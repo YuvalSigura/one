@@ -1,19 +1,25 @@
 {
+  "repository": "C:/Users/YOUR_USER/Documents/GitHub/harness-ceo-test",
+  "worktree_root": "C:/Users/YOUR_USER/Documents/one-worktrees",
+  "artifact_root": "C:/Users/YOUR_USER/.one/artifacts",
   "agents": {
-    "claude": {
-      "argv": ["claude", "--version"],
-      "cwd": ".",
-      "timeout_seconds": 30
-    },
     "codex": {
-      "argv": ["codex", "--version"],
-      "cwd": ".",
-      "timeout_seconds": 30
+      "enabled": false,
+      "argv": ["codex", "exec", "--sandbox", "workspace-write", "-"],
+      "input_mode": "stdin",
+      "timeout_seconds": 900
+    },
+    "claude": {
+      "enabled": false,
+      "argv": ["claude", "-p"],
+      "input_mode": "stdin",
+      "timeout_seconds": 900
     },
     "grok-cli": {
-      "argv": ["grok", "--version"],
-      "cwd": ".",
-      "timeout_seconds": 30
+      "enabled": false,
+      "argv": ["grok", "-p", "{brief}"],
+      "input_mode": "brief_argument",
+      "timeout_seconds": 600
     }
   }
 }

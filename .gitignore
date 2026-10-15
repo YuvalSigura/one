@@ -8,3 +8,7 @@ __pycache__/
 *.db-wal
 .env
 *.log
+*.local.json
+*.local.toml
+coverage.xml
+.coverage

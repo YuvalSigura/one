@@ -1,75 +1,103 @@
-# ONE — Local MCP Bridge
+# ONE — Local multi-agent MCP bridge
 
-ONE connects **Grok Bot**, **Grok CLI**, **Claude Code** and **Codex** through a shared **local MCP coordination interface**. Grok Bot remains the development manager; ONE does not replace it or HOMELAB's research CEO.
+**Goal:** connect your existing Grok Bot development manager with **Grok CLI, Claude Code and Codex** through one shared, persistent, local coordination interface. ONE does **not** replace Grok Bot and does **not** control HOMELAB investigations.
 
-## Current implementation (MVP)
+## What is built (v0.2)
 
-- A real MCP **stdio server** with nine tools: task creation/list/get/claim/finish, agent messages/inboxes and SHA256 artifact references.
-- Durable SQLite state shared across separate MCP client processes.
-- Small operator CLI to inspect and submit tasks.
-- Separate **operator-only** CLI process adapter for verifying locally installed agent commands; **not callable through MCP**.
-- No external services, model calls, secrets, target-facing actions or changes to HOMELAB.
+- Real **stdio MCP** server with 9 tools for tasks, messages/inbox acknowledgements, artifact references and task events.
+- Shared **SQLite WAL** state, idempotent dispatch keys, atomic claims, explicit approval, durable events and crash-safe failure-to-retry behavior.
+- Operator-controlled **CLI workers** for Codex, Claude and Grok CLI. Executables and arguments are locally reviewed; worker launches **one approved task**, with a timeout, in a fresh pinned **Git worktree**, collects logs and path-change receipts, and reports its completion to Grok Bot's inbox.
+- Windows-friendly connection-config generator for Grok CLI, Claude Code and Codex. It never edits existing provider settings automatically.
+- Offline tests and CI workflow. No API keys or cloud services required for the **MCP server** itself.
 
-**Important:** This is a working coordination MCP server, **not yet a verified autonomous Grok Bot ↔ Claude ↔ Codex ↔ Grok CLI integration**. Local Grok Bot MCP registration and CLI execution protocols must be verified on the operator machine. MCP agent names are labels, not authenticated users.
+**Boundaries:** MCP is a coordination channel, not an OS security boundary. It does not grant target access, does not launch models, and cannot bypass the operator's approval. Model invocations are possible **only** through the separately invoked operator worker. The existing Grok Bot application's direct attachment interface has not been tested on your PC; end-to-end four-way operation is not yet claimed.
 
-## Install (Windows PowerShell / Python 3.11+)
+## 1. Install on Windows (PowerShell)
 
 ```powershell
 git clone https://github.com/YuvalSigura/one.git
 cd one
 py -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -e .
-$env:ONE_DB = "$HOME\.one\state.db"
-.\.venv\Scripts\python.exe -m one_mcp.server
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-The last command starts a **stdio MCP server** and waits for an MCP client. It is normal for the terminal to show nothing. Do not use it as an interactive chat.
+No background service needs to be installed. Each MCP host starts `python -m one_mcp.server` as its own stdio child; they share the same SQLite database path.
 
-### MCP client registration
-
-Use the client's own verified MCP configuration interface. Generic stdio server settings:
-
-```json
-{
-  "command": "C:\\path\\to\\one\\.venv\\Scripts\\python.exe",
-  "args": ["-m", "one_mcp.server"],
-  "env": {"ONE_DB": "C:\\Users\\YOUR_USER\\.one\\state.db"}
-}
-```
-
-Use the **same ONE_DB absolute path** for each local client. The CLI may be used independently:
+## 2. Connect the three local CLI clients
 
 ```powershell
-one create "P0-1 review" "Review evidence-backed differential outcome patch" codex --base-commit HEAD --acceptance "offline regressions pass"
-one list
-one inbox claude
+.\.venv\Scripts\python.exe -m one_mcp.cli connections --output-dir .one\connections
 ```
 
-### Local CLI adapter (separate explicit approval)
+This writes **three templates**, not live configuration changes:
+
+| File | Place the contents in |
+|---|---|
+| `claude.mcp.json` | Project `.mcp.json` for Claude Code (merge with existing config; don't overwrite) |
+| `grok.config.toml` | Project `.grok/config.toml` for Grok CLI (merge `[mcp_servers.one]`) |
+| `codex.config.toml` | Codex `~/.codex/config.toml` (merge `[mcp_servers.one]`) |
+
+All templates use the same absolute `ONE_DB` and the Python interpreter used to generate them. If you invoke `one connections` under a different Python environment, check paths first. Avoid merging config files automatically because each client may already have MCP servers configured.
+
+**CLI validation:** Grok CLI: `grok mcp doctor one`; Claude Code: `claude mcp list`; Codex: `codex mcp list`. The installed versions determine exact behavior. See `docs/CONNECT_GROK_BOT.md` for the separate Grok Bot connection check.
+
+## 3. MCP interface / test message
+
+Use `one_create_task` from one of your connected MCP clients. Each task has `title`, `goal`, `assignee`, `request_key`, optional pinned `base_commit`, `allowed_paths` and `acceptance`. Use `one_inbox` and `one_send_message` to communicate. Tools only persist metadata; **they do not execute CLIs or approve tasks**.
+
+The equivalent local commands are:
 
 ```powershell
-# Copy config/agents.example.json to a local untracked file, edit executable/cwd.
-py -m one_mcp.runner codex --config config/agents.example.json
-# After reviewing argv, operator may explicitly launch:
-py -m one_mcp.runner codex --config config/agents.example.json --execute
+.\.venv\Scripts\python.exe -m one_mcp.cli create "Review P0-1" "Review scientific-feedback patch" codex --request-key P0-1-review
+.\.venv\Scripts\python.exe -m one_mcp.cli list
+.\.venv\Scripts\python.exe -m one_mcp.cli inbox grok-bot
 ```
 
-The example runs only `--version`. ONE does **not** automatically invoke any paid model. The runner cannot be called by MCP tools.
+## 4. Explicitly approved CLI execution (optional)
 
-## Tests
+First, make a local copy of `config/agents.example.json`, replacing `YOUR_USER` and reviewing the repository, worktree and artifact paths. Ensure worktree/artifact root directories **already exist**, are outside your repo, and that your provider CLI executables work. Enable **only the specific agent you intend to use**.
 
 ```powershell
-py -m pip install -e .
-py -m unittest discover -s tests -v
+Copy-Item config\agents.example.json config\agents.local.json
+# Manually edit config\agents.local.json; set your repo, roots, and codex.enabled=true.
+.\.venv\Scripts\python.exe -m one_mcp.cli doctor --config config\agents.local.json
+.\.venv\Scripts\python.exe -m one_mcp.cli worker codex --config config\agents.local.json
 ```
 
-## Safety and limitations
+**The worker command above is a dry-run**. To run for real, first create a task with a **40-character pinned git commit**, allowed file paths, and approve that task locally:
 
-- Do not store credentials or target secrets in task descriptions/messages.
-- Do not expose the MCP stdio server over the internet.
-- MCP client-supplied agent labels are **not authentication**.
-- Budgets are metadata, not enforced quota limits.
-- This version does not launch other CLIs from Grok Bot or auto-create worktrees.
-- See [architecture and next gates](docs/ARCHITECTURE.md).
+```powershell
+.\.venv\Scripts\python.exe -m one_mcp.cli approve TASK-REPLACE_WITH_REAL_ID
+.\.venv\Scripts\python.exe -m one_mcp.cli worker codex --config config\agents.local.json --execute
+```
 
-This repository is intentionally separate from `YuvalSigura/harness`.
+No agent can approve another agent's paid run through MCP. One `--execute` invocation handles at most one approved task; no automatic retry and no merge/push. Change logs and local output files remain in the configured `artifact_root`, outside the repository. **Exit code 0 is not proof of successful implementation.**
+
+To inspect a crashed process' stale task state:
+
+```powershell
+.\.venv\Scripts\python.exe -m one_mcp.cli recover
+```
+
+This blocks expired jobs; it never replays a potentially billed API call.
+
+## 5. Development / testing
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+`tests/` covers MCP framing, cross-process persistence, schema migrations, concurrent worker claims, idempotency, messaging, approval boundaries, git-worktree isolation, changed-path quarantine, bad arguments, client configuration generation, and fail-closed recovery.
+
+## 6. Security and known limitations
+
+- **Never** put credentials, security target secrets, live engagement artifacts or private operator details in model-visible task messages. A best-effort scrubber is not secret isolation.
+- **Do not** expose this stdio toolset on a public HTTP interface. Agent names are labels, not cryptographically authenticated identities.
+- **Git worktrees are not sandboxes.** A provider CLI with wide permissions can still access other local files. Use least-privilege CLI sandbox modes and appropriate OS account separation.
+- **Provider budgets are not enforced token quotas.** ONE limits one local invocation/time, not the provider's billable reasoning usage.
+- **MCP protocol compatibility** is implemented for commonly supported legacy revisions; full SDK version-by-version compatibility still requires live CLI checks.
+- **No direct Grok Bot connection** is claimed until its actual installed interface is tested. Grok CLI MCP support is documented but is a separate program.
+- No `harness` files, logs, engagements, runtime processes, or security targets are modified by ONE installation.
+
+Further details: [architecture](docs/ARCHITECTURE.md) · [connecting Grok Bot](docs/CONNECT_GROK_BOT.md).

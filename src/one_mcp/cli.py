@@ -1,42 +1,80 @@
-"""Operator CLI for task coordination. No subprocess launches by default."""
+"""ONE local operator CLI. Approvals and worker runs are never exposed via MCP."""
+from __future__ import annotations
+
 import argparse
 import json
+import sys
+
 from .store import Store
+from .worker import execute_one, doctor
+from .connections import emit
 
-def main():
-    p=argparse.ArgumentParser(prog="one")
-    sub=p.add_subparsers(dest="command",required=True)
-    t=sub.add_parser("create")
-    t.add_argument("title");t.add_argument("goal");t.add_argument("assignee")
-    t.add_argument("--owner",default="grok-bot")
-    t.add_argument("--base-commit",default="")
-    t.add_argument("--allowed-path",action="append",default=[])
-    t.add_argument("--acceptance",action="append",default=[])
-    t.add_argument("--budget",type=int,default=0)
-    l=sub.add_parser("list");l.add_argument("--assignee");l.add_argument("--status")
-    g=sub.add_parser("get");g.add_argument("task_id")
-    c=sub.add_parser("claim");c.add_argument("task_id");c.add_argument("agent")
-    f=sub.add_parser("finish");f.add_argument("task_id");f.add_argument("agent");f.add_argument("status",choices=["completed","failed","blocked"]);f.add_argument("result")
-    m=sub.add_parser("message");m.add_argument("task_id");m.add_argument("sender");m.add_argument("recipient");m.add_argument("body")
-    i=sub.add_parser("inbox");i.add_argument("recipient")
-    a=sub.add_parser("artifact");a.add_argument("task_id");a.add_argument("producer");a.add_argument("kind");a.add_argument("path");a.add_argument("digest")
-    al=sub.add_parser("artifacts");al.add_argument("task_id")
-    args=p.parse_args()
-    with_store=Store()
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(prog="one", description="Local development coordination")
+    sub = parser.add_subparsers(dest="command", required=True)
+    create = sub.add_parser("create", help="Create a queued task; does not execute it")
+    create.add_argument("title"); create.add_argument("goal"); create.add_argument("assignee")
+    create.add_argument("--owner", default="grok-bot")
+    create.add_argument("--base-commit", default="")
+    create.add_argument("--allowed-path", action="append", default=[])
+    create.add_argument("--acceptance", action="append", default=[])
+    create.add_argument("--budget", type=int, default=0)
+    create.add_argument("--request-key")
+    listing = sub.add_parser("list")
+    listing.add_argument("--assignee"); listing.add_argument("--status")
+    get = sub.add_parser("get"); get.add_argument("task_id")
+    approvals = sub.add_parser("approve"); approvals.add_argument("task_id")
+    reject = sub.add_parser("reject"); reject.add_argument("task_id")
+    cancel = sub.add_parser("cancel"); cancel.add_argument("task_id")
+    message = sub.add_parser("message")
+    for name in ("task_id", "sender", "recipient", "body"):
+        message.add_argument(name)
+    inbox = sub.add_parser("inbox"); inbox.add_argument("recipient")
+    ack = sub.add_parser("ack"); ack.add_argument("message_id"); ack.add_argument("recipient")
+    artifacts = sub.add_parser("artifacts"); artifacts.add_argument("task_id")
+    events = sub.add_parser("events"); events.add_argument("task_id")
+    recover = sub.add_parser("recover", help="Block expired worker leases (never auto-retry)")
+    worker = sub.add_parser("worker", help="Run at most one approved CLI task")
+    worker.add_argument("agent", choices=["claude", "codex", "grok-cli"])
+    worker.add_argument("--config", required=True)
+    worker.add_argument("--execute", action="store_true", help="Explicit operator execution; default dry-run")
+    connection = sub.add_parser("connections", help="Print safe local MCP configuration snippets")
+    connection.add_argument("--output-dir", help="Write new snippet files here, never overwrite")
+    check = sub.add_parser("doctor")
+    check.add_argument("--config", required=True)
+    args = parser.parse_args(argv)
     try:
-        if args.command=="create":
-            result=with_store.create_task(args.title,args.goal,args.assignee,args.owner,args.base_commit,args.allowed_path,args.acceptance,args.budget)
-        elif args.command=="list":result=with_store.list_tasks(args.assignee,args.status)
-        elif args.command=="get":result=with_store.task(args.task_id)
-        elif args.command=="claim":result=with_store.claim(args.task_id,args.agent)
-        elif args.command=="finish":result=with_store.finish(args.task_id,args.agent,args.status,args.result)
-        elif args.command=="message":result=with_store.message(args.task_id,args.sender,args.recipient,args.body)
-        elif args.command=="inbox":result=with_store.inbox(args.recipient)
-        elif args.command=="artifact":result=with_store.add_artifact(args.task_id,args.producer,args.kind,args.path,args.digest)
-        else:result=with_store.artifacts(args.task_id)
-        print(json.dumps(result,ensure_ascii=False,indent=2))
-    finally:
-        with_store.close()
+        if args.command == "connections":
+            result = emit(args.output_dir)
+        elif args.command == "doctor":
+            result = doctor(args.config)
+        else:
+            with Store() as store:
+                if args.command == "create":
+                    result = store.create_task(args.title, args.goal, args.assignee, args.owner,
+                                               args.base_commit, args.allowed_path, args.acceptance,
+                                               args.budget, args.request_key)
+                elif args.command == "list": result = store.list_tasks(args.assignee, args.status)
+                elif args.command == "get": result = store.task(args.task_id)
+                elif args.command == "approve": result = store.approve(args.task_id, "approved")
+                elif args.command == "reject": result = store.approve(args.task_id, "rejected")
+                elif args.command == "cancel": result = store.cancel(args.task_id)
+                elif args.command == "message": result = store.message(args.task_id, args.sender, args.recipient, args.body)
+                elif args.command == "inbox": result = store.inbox(args.recipient)
+                elif args.command == "ack": result = store.ack(args.message_id, args.recipient)
+                elif args.command == "artifacts": result = store.artifacts(args.task_id)
+                elif args.command == "events": result = store.events(args.task_id)
+                elif args.command == "recover": result = {"blocked_tasks": store.recover_expired()}
+                elif args.command == "worker": result = execute_one(store, args.agent, args.config, dry_run=not args.execute)
+                else: raise ValueError("unknown command")
+        print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
+        return 0
+    except (ValueError, RuntimeError, OSError) as exc:
+        print(json.dumps({"status": "error", "reason": type(exc).__name__,
+                          "message": str(exc)[:250]}, ensure_ascii=False), file=sys.stderr)
+        return 1
 
-if __name__=="__main__":
-    main()
+
+if __name__ == "__main__":
+    raise SystemExit(main())
