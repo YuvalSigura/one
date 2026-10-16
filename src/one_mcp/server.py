@@ -31,7 +31,7 @@ TOOLS = [
     _spec("one_create_task", "Queue a development task; does NOT execute a model or approve spending.", {
         "title": _field(description="Short task title"),
         "goal": _field(description="Specific goal, max 8000 characters; no secrets"),
-        "assignee": _field(description="grok-cli|claude|codex|operator|grok-bot"),
+        "assignee": _field(description="grok-cli|claude|codex|antigravity|operator|grok-bot"),
         "owner": _field(description="The coordinator label (not authenticated)"),
         "base_commit": _field(description="Exact git commit SHA for an isolated worktree"),
         "allowed_paths": {"type": "array", "items": {"type": "string"}},

@@ -11,7 +11,7 @@ from pathlib import Path
 from . import webhook
 from .safety import bounded, redact, validate_paths, ensure_digest, MAX_GOAL, MAX_TITLE, MAX_MESSAGE, MAX_RESULT, MAX_ARTIFACT_PATH
 
-AGENTS = frozenset({"grok-bot", "grok-cli", "claude", "codex", "operator"})
+AGENTS = frozenset({"grok-bot", "grok-cli", "claude", "codex", "antigravity", "operator"})
 STATUS = frozenset({"queued", "running", "completed", "failed", "blocked", "cancelled"})
 TERMINAL = frozenset({"completed", "failed", "blocked", "cancelled"})
 

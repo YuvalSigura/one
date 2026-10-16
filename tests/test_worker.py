@@ -104,6 +104,24 @@ class WorkerTests(unittest.TestCase):
                                   {"enabled": True, "argv": argv, "input_mode": "brief_argument",
                                    "timeout_seconds": 60}, brief)
 
+    def test_antigravity_agy_headless_command(self):
+        brief = self.base / "brief.md"
+        row = {"enabled": True, "input_mode": "brief_argument", "timeout_seconds": 60,
+               "argv": ["C:/Users/u/AppData/Local/agy/bin/agy.exe", "--model", "gemini-4-argon-high",
+                        "--mode", "accept-edits", "-p", "{brief}"]}
+        argv, stdin, timeout = validated_command("antigravity", row, brief)
+        self.assertIsNone(stdin)
+        self.assertEqual(argv[:6], row["argv"][:6])
+        self.assertIn("Read the approved ONE development task", argv[6])
+        self.assertIn("antigravity", __import__("one_mcp.store", fromlist=["AGENTS"]).AGENTS)
+        for bad in (["agy", "--dangerously-skip-permissions", "-p", "{brief}"],
+                    ["claude.exe", "-p", "{brief}"]):
+            with self.assertRaises(ValueError):
+                validated_command("antigravity", dict(row, argv=bad), brief)
+        task = self.store.create_task("agy", "ping", "antigravity", base_commit=self.commit,
+                                      allowed_paths=["src"])
+        self.assertEqual(task["assignee"], "antigravity")
+
     def test_unpinned_commit_fails_closed(self):
         task = self.store.create_task("unpinned", "should not write", "codex", allowed_paths=["src"])
         self.store.approve(task["id"], "approved")

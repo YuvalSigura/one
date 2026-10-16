@@ -22,6 +22,7 @@ EXECUTABLES = {
     "claude": {"claude", "claude.exe", "claude.cmd"},
     "codex": {"codex", "codex.exe", "codex.cmd"},
     "grok-cli": {"grok", "grok.exe", "grok.cmd", "grok-cli", "grok-cli.exe", "grok-cli.cmd"},
+    "antigravity": {"agy", "agy.exe"},
 }
 FORBIDDEN_FLAGS = {"--yolo", "--dangerously-skip-permissions", "--full-auto", "--no-sandbox", "bypassPermissions"}
 

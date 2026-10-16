@@ -36,7 +36,7 @@ def main(argv=None):
     events = sub.add_parser("events"); events.add_argument("task_id")
     recover = sub.add_parser("recover", help="Block expired worker leases (never auto-retry)")
     worker = sub.add_parser("worker", help="Run at most one approved CLI task")
-    worker.add_argument("agent", choices=["claude", "codex", "grok-cli"])
+    worker.add_argument("agent", choices=["claude", "codex", "grok-cli", "antigravity"])
     worker.add_argument("--config", required=True)
     worker.add_argument("--execute", action="store_true", help="Explicit operator execution; default dry-run")
     connection = sub.add_parser("connections", help="Print safe local MCP configuration snippets")
