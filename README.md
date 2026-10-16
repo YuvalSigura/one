@@ -54,6 +54,21 @@ The equivalent local commands are:
 .\.venv\Scripts\python.exe -m one_mcp.cli inbox grok-bot
 ```
 
+## 3a. Optional outbound webhook (wake Grok Bot instead of polling)
+
+When `ONE_WEBHOOK_URL` is set, every task **status change** (queued→running, running→completed/failed/blocked, queued→cancelled, lease expiry→blocked) and every **task message** is POSTed as JSON to that URL after the SQLite write commits. The hook lives in the store layer, so the MCP server, the CLI and the worker are all covered. Delivery is fire-and-forget (stdlib `urllib`, 3 s timeout, daemon thread, no redirects followed); failures are logged to stderr only and never affect the DB write or the MCP stdout stream.
+
+| Variable | Meaning |
+|---|---|
+| `ONE_WEBHOOK_URL` | http(s) endpoint. Unset or empty = feature disabled, no behavior change. |
+| `ONE_WEBHOOK_SECRET` | Sender key. Never logged or put in the payload. |
+| `ONE_WEBHOOK_AUTH_HEADER` | Header name for the key, default `Authorization` (sent as `Bearer <secret>`); any other header gets the raw secret. |
+| `ONE_WEBHOOK_EVENTS` | Optional comma filter: `status`, `message`, `all`, or `status:<new status>` (e.g. `status:completed,status:failed,status:blocked`). Default: status changes + messages. |
+
+Payload fields: `event` (`task.status_changed` or `task.message`), `task_id`, `title`, `assignee`, `owner`, `status`, `old_status`/`new_status` (status events), `message` {`id`, `sender`, `recipient`, `text` (first 2000 chars), `truncated`} (message events), `timestamp` (UTC ISO 8601), `source`, `version`.
+
+Each MCP host starts its own server process, so the variables must be visible to Claude Code / Grok CLI / Codex (set them as user environment variables and restart those clients, or add them to the client's MCP `env` block).
+
 ## 4. Explicitly approved CLI execution (optional)
 
 First, make a local copy of `config/agents.example.json`, replacing `YOUR_USER` and reviewing the repository, worktree and artifact paths. Ensure worktree/artifact root directories **already exist**, are outside your repo, and that your provider CLI executables work. Enable **only the specific agent you intend to use**.
@@ -87,6 +102,8 @@ This blocks expired jobs; it never replays a potentially billed API call.
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
+
+If `ONE_WEBHOOK_URL` is set in your environment, clear it for the shell first (`Remove-Item Env:ONE_WEBHOOK_URL`) so test tasks don't wake your real Grok Bot routine; `tests/test_webhook.py` uses its own local stub.
 
 `tests/` covers MCP framing, cross-process persistence, schema migrations, concurrent worker claims, idempotency, messaging, approval boundaries, git-worktree isolation, changed-path quarantine, bad arguments, client configuration generation, and fail-closed recovery.
 

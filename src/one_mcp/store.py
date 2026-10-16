@@ -8,6 +8,7 @@ import time
 import uuid
 from pathlib import Path
 
+from . import webhook
 from .safety import bounded, redact, validate_paths, ensure_digest, MAX_GOAL, MAX_TITLE, MAX_MESSAGE, MAX_RESULT, MAX_ARTIFACT_PATH
 
 AGENTS = frozenset({"grok-bot", "grok-cli", "claude", "codex", "operator"})
@@ -100,6 +101,21 @@ class Store:
     def __exit__(self, *_):
         self.close()
 
+    def _notify(self, event, task_id, **fields):
+        """Single hook for outbound webhooks (CLI, worker and MCP all write through Store).
+
+        Called only after the write is durable: the connection is autocommit, and
+        claim_next calls it after COMMIT. Never raises, never writes to stdout."""
+        if not webhook.enabled():
+            return
+        if self.db.in_transaction:
+            webhook._log(f"skipped {event}: called inside an open transaction")
+            return
+        try:
+            webhook.notify(event, self.task(task_id), **fields)
+        except Exception as exc:
+            webhook._log(f"skipped {event}: {type(exc).__name__}")
+
     def _one(self, sql, args=()):
         row = self.db.execute(sql, args).fetchone()
         return dict(row) if row else None
@@ -190,6 +206,7 @@ class Store:
         if cursor.rowcount != 1:
             raise ValueError("only queued tasks can be cancelled")
         self._event(task_id, "cancelled")
+        self._notify(webhook.STATUS_CHANGED, task_id, old_status="queued", new_status="cancelled")
         return self.task(task_id)
 
     def claim_next(self, agent, lease_seconds=1800):
@@ -215,6 +232,7 @@ class Store:
             if self.db.in_transaction:
                 self.db.execute("ROLLBACK")
             raise
+        self._notify(webhook.STATUS_CHANGED, row["id"], old_status="queued", new_status="running")
         return self.task(row["id"])
 
     def complete(self, task_id, agent, status, result, workspace=None, usage=None, artifact_digest=None):
@@ -232,6 +250,7 @@ class Store:
         if cursor.rowcount != 1:
             raise ValueError("task is not running under this agent")
         self._event(task_id, status, {"agent": agent, "workspace": str(workspace or "")})
+        self._notify(webhook.STATUS_CHANGED, task_id, old_status="running", new_status=status)
         return self.task(task_id)
 
     def recover_expired(self, now=None):
@@ -239,11 +258,13 @@ class Store:
         now = now or time.time()
         rows = self.db.execute("SELECT id FROM tasks WHERE status='running' AND lease_deadline < ?", (now,)).fetchall()
         for row in rows:
-            self.db.execute("""UPDATE tasks SET status='blocked',result=?,lease_deadline=NULL,updated=?
+            cursor = self.db.execute("""UPDATE tasks SET status='blocked',result=?,lease_deadline=NULL,updated=?
                 WHERE id=? AND status='running' AND lease_deadline < ?""",
                 ("Worker lease expired. Inspect logs/processes before any manual retry.", now, row["id"], now))
             if self.task(row["id"])["status"] == "blocked":
                 self._event(row["id"], "lease_expired_blocked")
+            if cursor.rowcount == 1:
+                self._notify(webhook.STATUS_CHANGED, row["id"], old_status="running", new_status="blocked")
         return [r["id"] for r in rows]
 
     def message(self, task_id, sender, recipient, body):
@@ -255,7 +276,9 @@ class Store:
         message_id = "MSG-" + uuid.uuid4().hex[:16]
         self.db.execute("INSERT INTO messages VALUES (?,?,?,?,?,?)",
                         (message_id, task_id, sender, recipient, body, time.time()))
-        return self._one("SELECT * FROM messages WHERE id=?", (message_id,))
+        stored = self._one("SELECT * FROM messages WHERE id=?", (message_id,))
+        self._notify(webhook.MESSAGE, task_id, message=stored)
+        return stored
 
     def inbox(self, recipient, limit=25, unread_only=True):
         if recipient not in AGENTS:
