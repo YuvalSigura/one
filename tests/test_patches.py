@@ -87,7 +87,7 @@ class PatchAwareTests(unittest.TestCase):
             "line_hints": [{"path": "src/module.py", "lines": ["L1-L1"]}],
             "handoff_summary": {"summary": "code changed", "tests": ["unittest: pass"]},
         }
-        self.store.approve(upstream, "approved")
+        self.flow.approve_all("patch-test")
         self.store.claim_next("codex")
         receipt = self.artifacts / upstream / "changes.json"
         receipt.parent.mkdir(parents=True)
