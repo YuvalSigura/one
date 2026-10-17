@@ -106,6 +106,7 @@ class Store:
           handoff_mode TEXT NOT NULL DEFAULT 'focused_review',
           must_know TEXT NOT NULL DEFAULT '{}',
           required_handoff TEXT NOT NULL DEFAULT '[]',
+          required_checks TEXT NOT NULL DEFAULT '[]',
           PRIMARY KEY(flow_id,step_key),
           FOREIGN KEY(flow_id) REFERENCES flow_plans(id),
           FOREIGN KEY(task_id) REFERENCES tasks(id)
@@ -141,6 +142,7 @@ class Store:
             "handoff_mode": "TEXT NOT NULL DEFAULT 'focused_review'",
             "must_know": "TEXT NOT NULL DEFAULT '{}'",
             "required_handoff": "TEXT NOT NULL DEFAULT '[]'",
+            "required_checks": "TEXT NOT NULL DEFAULT '[]'",
         }.items():
             if name not in flow_columns:
                 self.db.execute(f"ALTER TABLE flow_steps ADD COLUMN {name} {ddl}")
