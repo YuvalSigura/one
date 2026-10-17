@@ -28,6 +28,44 @@ ROLE_CONTRACTS = {
 }
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$")
 SHA = re.compile(r"^[a-fA-F0-9]{40}$")
+MODE_BY_ROLE = {
+    "planner": "research", "researcher": "research",
+    "implementer": "execution_only", "integrator": "execution_only",
+    "tester": "focused_review", "reviewer": "focused_review",
+    "security-reviewer": "focused_review",
+}
+CONTEXT_MODES = frozenset({"execution_only", "focused_review", "research"})
+REQUIREMENT_FIELDS = frozenset({"facts", "decisions", "invariants", "do_not_repeat"})
+RECEIPT_REQUIREMENTS = frozenset({"changed_files", "line_hints", "summary", "tests"})
+MAX_HANDOFF_CHARS = 5500
+
+def _context_contract(item, role, deps):
+    mode = item.get("handoff_mode", MODE_BY_ROLE[role])
+    if mode not in CONTEXT_MODES:
+        raise ValueError("invalid handoff_mode")
+    knowledge = item.get("must_know", {})
+    if not isinstance(knowledge, dict) or set(knowledge) - REQUIREMENT_FIELDS:
+        raise ValueError("invalid must_know fields")
+    canon = {}
+    for group, values in knowledge.items():
+        if not isinstance(values, list) or len(values) > 8:
+            raise ValueError("must_know values must be bounded lists")
+        if any(not isinstance(v, str) or not v.strip() or len(v) > 260 for v in values):
+            raise ValueError("invalid must_know item")
+        canon[group] = [redact(value.strip()) for value in values]
+    if len(json.dumps(canon, ensure_ascii=False)) > 1800:
+        raise ValueError("must_know exceeds context budget")
+    needed = item.get("required_handoff", [])
+    if not isinstance(needed, list) or len(needed) > len(RECEIPT_REQUIREMENTS):
+        raise ValueError("invalid required_handoff")
+    if any(not isinstance(k, str) or k not in RECEIPT_REQUIREMENTS for k in needed):
+        raise ValueError("unknown required_handoff evidence field")
+    if len(set(needed)) != len(needed):
+        raise ValueError("duplicate required_handoff evidence")
+    if needed and not deps:
+        raise ValueError("required_handoff needs predecessor steps")
+    return mode, canon, sorted(needed)
+
 
 
 def _id(value, what):
@@ -68,7 +106,8 @@ def validate_plan(plan):
         raise ValueError("plan must have 1..32 steps")
     result, keys = [], set()
     permitted = {"key", "role", "title", "goal", "assignee", "base_commit",
-                 "allowed_paths", "acceptance", "depends_on", "context", "budget"}
+                 "allowed_paths", "acceptance", "depends_on", "context", "budget",
+                 "handoff_mode", "must_know", "required_handoff"}
     for item in steps:
         if not isinstance(item, dict) or set(item) - permitted:
             raise ValueError("unknown step fields")
@@ -104,12 +143,14 @@ def validate_plan(plan):
         paths, acceptance = item.get("allowed_paths", []), item.get("acceptance", [])
         if not isinstance(paths, list) or not isinstance(acceptance, list):
             raise ValueError("paths/acceptance must be lists")
+        handoff_mode, must_know, required_handoff = _context_contract(item, role, deps)
         result.append({"key": key, "role": role, "title": _text(item.get("title"), "title", 200),
                        "goal": _text(item.get("goal"), "goal", 8000),
                        "assignee": assignee, "base_commit": commit,
                        "allowed_paths": paths, "acceptance": acceptance,
                        "depends_on": deps, "context": redact(_text(item.get("context", ""), "context")),
-                       "budget": budget})
+                       "handoff_mode": handoff_mode, "must_know": must_know,
+                       "required_handoff": required_handoff, "budget": budget})
     table = {x["key"]: x for x in result}
     for item in result:
         if any(d["step"] not in table for d in item["depends_on"]):
@@ -179,8 +220,12 @@ class RoleFlow:
                                               allowed_paths=item["allowed_paths"],
                                               acceptance=item["acceptance"], budget=item["budget"],
                                               request_key=key)
-                self.db.execute("INSERT INTO flow_steps(flow_id,step_key,task_id,role,step_order,context) VALUES(?,?,?,?,?,?)",
-                                (fid, item["key"], task["id"], item["role"], order, item["context"]))
+                self.db.execute("""INSERT INTO flow_steps(
+                    flow_id,step_key,task_id,role,step_order,context,handoff_mode,must_know,required_handoff
+                ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                    (fid, item["key"], task["id"], item["role"], order, item["context"],
+                     item["handoff_mode"], json.dumps(item["must_know"], ensure_ascii=False),
+                     json.dumps(item["required_handoff"])))
                 for dep in item["depends_on"]:
                     self.db.execute("INSERT INTO flow_dependencies(flow_id,step_key,upstream_key,gate) VALUES(?,?,?,?)",
                                     (fid, item["key"], dep["step"], dep["gate"]))
