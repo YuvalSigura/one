@@ -10,6 +10,8 @@ from .store import Store
 from .worker import execute_one, doctor
 from .connections import emit
 from .roleflow import RoleFlow
+from .templates import from_engineering
+from .engineering import read_plan as read_engineering_plan
 
 
 def main(argv=None):
@@ -47,6 +49,8 @@ def main(argv=None):
     check.add_argument("--config", required=True)
     flow_create = sub.add_parser("flow-create", help="Create a durable role pipeline; no workers launched")
     flow_create.add_argument("plan", help="Path to reviewed JSON role-flow plan")
+    flow_template = sub.add_parser("flow-template", help="Convert an Engineering Desk method to a runnable role DAG")
+    flow_template.add_argument("plan", help="Path to an existing reviewed Engineering Desk JSON plan")
     flow_status = sub.add_parser("flow-status", help="Show role pipeline and dependency readiness")
     flow_status.add_argument("flow_id")
     flow_approve = sub.add_parser("flow-approve", help="Explicitly approve each queued task in frozen pipeline")
@@ -72,6 +76,8 @@ def main(argv=None):
             with Store() as store:
                 if args.command == "flow-create":
                     result = RoleFlow(store).create(json.loads(Path(args.plan).read_text(encoding="utf-8")))
+                elif args.command == "flow-template":
+                    result = RoleFlow(store).create(from_engineering(read_engineering_plan(Path(args.plan))))
                 elif args.command == "flow-status":
                     result = RoleFlow(store).status(args.flow_id)
                 elif args.command == "flow-approve":
