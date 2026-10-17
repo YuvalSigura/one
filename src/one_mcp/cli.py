@@ -12,6 +12,7 @@ from .connections import emit
 from .roleflow import RoleFlow, read_plan as read_role_plan
 from .templates import from_engineering
 from .engineering import read_plan as read_engineering_plan
+from .quality import run_quality
 
 
 def main(argv=None):
@@ -62,6 +63,10 @@ def main(argv=None):
     flow_verdict.add_argument("task_id")
     flow_verdict.add_argument("decision", choices=["accepted", "rejected"])
     flow_verdict.add_argument("--reason", required=True)
+    flow_quality = sub.add_parser("flow-quality", help="Run local deterministic checks; never launches AI providers")
+    flow_quality.add_argument("task_id")
+    flow_quality.add_argument("--config", required=True, help="Reviewed local worker configuration")
+    flow_quality.add_argument("--check", action="append", choices=["diff", "unittest", "pytest"], required=True)
     flow_run = sub.add_parser("flow-run", help="Dispatch only approved stages, with dependency handoffs")
     flow_run.add_argument("flow_id")
     flow_run.add_argument("--config", required=True)
@@ -90,6 +95,8 @@ def main(argv=None):
                     result = RoleFlow(store).revoke(args.flow_id)
                 elif args.command == "flow-verdict":
                     result = RoleFlow(store).verdict(args.task_id, args.decision, args.reason)
+                elif args.command == "flow-quality":
+                    result = run_quality(store, args.task_id, args.config, args.check)
                 elif args.command == "flow-run":
                     result = RoleFlow(store).execute_approved(args.flow_id, args.config,
                         max_tasks=args.max_tasks, parallel=args.parallel, execute=args.execute)
