@@ -137,9 +137,15 @@ def materialize_for_tester(store, task, destination, artifact_root):
     # Renames/copies have two paths in porcelain; refuse rather than leave an
     # old path behind in the test snapshot.
     from .worker import _changes
-    status = _git(workspace, "status", "--porcelain", "--untracked-files=all").stdout.splitlines()
-    if any(line[:2].strip() in {"R", "C"} or
-           ("R" in line[:2] or "C" in line[:2]) for line in status):
+    import subprocess
+    status = subprocess.run(["git", "-C", str(workspace), "status", "--porcelain", "-z",
+                             "--untracked-files=all"], stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            timeout=30, check=True).stdout
+    # NUL-safe, including filenames containing LF. Git rename/copy operations
+    # require two paths and an explicit merge-aware adapter.
+    if any(b"R" in record[:2] or b"C" in record[:2]
+           for record in status.split(b"\x00") if len(record) >= 3):
         raise ValueError("rename/copy requires explicit patch integration")
     actual_changes = set(_changes(workspace))
     if actual_changes != set(names):
@@ -157,7 +163,8 @@ def materialize_for_tester(store, task, destination, artifact_root):
                 raise ValueError("deletion receipt inconsistent with source")
             planned.append((name, None, dst, None))
             continue
-        if not src.is_file() or src.is_symlink() or src.stat().st_size > MAX_FILE:
+        if (not src.is_file() or src.is_symlink() or
+                src.stat().st_nlink > 1 or src.stat().st_size > MAX_FILE):
             raise ValueError("predecessor file missing, unsafe, or oversized")
         cumulative += src.stat().st_size
         if cumulative > MAX_TOTAL or file_digest(src) != digest:
