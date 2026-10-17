@@ -13,6 +13,7 @@ from .roleflow import RoleFlow, read_plan as read_role_plan
 from .templates import from_engineering
 from .engineering import read_plan as read_engineering_plan
 from .quality import run_quality
+from .metrics import flow_metrics
 
 
 def main(argv=None):
@@ -63,6 +64,9 @@ def main(argv=None):
     flow_verdict.add_argument("task_id")
     flow_verdict.add_argument("decision", choices=["accepted", "rejected"])
     flow_verdict.add_argument("--reason", required=True)
+    flow_metrics_cmd = sub.add_parser("flow-metrics", help="Read-only workflow effectiveness and context overhead")
+    flow_metrics_cmd.add_argument("flow_id")
+    flow_metrics_cmd.add_argument("--config", help="Optional config to count actual generated task brief bytes")
     flow_quality = sub.add_parser("flow-quality", help="Run local deterministic checks; never launches AI providers")
     flow_quality.add_argument("task_id")
     flow_quality.add_argument("--config", required=True, help="Reviewed local worker configuration")
@@ -95,6 +99,8 @@ def main(argv=None):
                     result = RoleFlow(store).revoke(args.flow_id)
                 elif args.command == "flow-verdict":
                     result = RoleFlow(store).verdict(args.task_id, args.decision, args.reason)
+                elif args.command == "flow-metrics":
+                    result = flow_metrics(store, args.flow_id, args.config)
                 elif args.command == "flow-quality":
                     result = run_quality(store, args.task_id, args.config, args.check)
                 elif args.command == "flow-run":
