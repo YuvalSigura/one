@@ -100,8 +100,13 @@ def run_quality(store, task_id, config_path, checks, *, timeout=120):
         raise ValueError("quality receipt already exists; retain history and create a new task for reruns")
     data = json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2).encode("utf-8")
     artifact.write_bytes(data)
-    store.add_artifact(task_id, "operator", "engineering_quality", str(artifact),
-                       hashlib.sha256(data).hexdigest())
+    digest = hashlib.sha256(data).hexdigest()
+    store.add_artifact(task_id, "operator", "engineering_quality", str(artifact), digest)
+    # This ledger is deliberately NOT exposed through MCP. Registered model
+    # artifacts (even forged producer='operator') cannot satisfy this gate.
+    store.db.execute("""INSERT INTO flow_quality_receipts
+        (task_id,digest,artifact_path,recorded_at) VALUES(?,?,?,?)""",
+        (task_id, digest, str(artifact), time.time()))
     return report
 
 
@@ -111,8 +116,14 @@ def assert_quality(store, task_id, required):
         return
     if not isinstance(required, list) or any(c not in PROFILES for c in required):
         raise ValueError("invalid stored required checks")
+    grant = store.db.execute(
+        "SELECT digest,artifact_path FROM flow_quality_receipts WHERE task_id=?",
+        (task_id,)).fetchone()
+    if grant is None:
+        raise ValueError("missing operator-origin engineering quality receipt")
     refs = [a for a in store.artifacts(task_id) if a["kind"] == "engineering_quality"
-            and a["producer"] == "operator"]
+            and a["producer"] == "operator" and a["digest"] == grant["digest"]
+            and a["path"] == grant["artifact_path"]]
     if len(refs) != 1:
         raise ValueError("missing or ambiguous local engineering quality receipt")
     record = refs[0]
