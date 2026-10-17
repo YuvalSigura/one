@@ -72,6 +72,8 @@ def focused_predecessor(workspace, manifest):
         if path.stat().st_size > 128_000:
             continue
         body = path.read_bytes()
+        if hashlib.sha256(body).hexdigest() != hashes[name]:
+            raise ValueError("predecessor changed during excerpt capture")
         if b"\x00" in body:
             continue
         text_lines = body.decode("utf-8", "replace").splitlines()
