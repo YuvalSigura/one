@@ -177,6 +177,25 @@ class RoleFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "untrusted or stale"):
             self.flow.handoff(integrate, artifact)
 
+    def test_reviewer_cannot_approve_its_own_implementation(self):
+        plan = example_plan()
+        plan["steps"][1]["assignee"] = "codex"
+        with self.assertRaisesRegex(ValueError, "same worker"):
+            self.flow.create(plan)
+        self.assertEqual(self.store.list_tasks(), [])
+
+    def test_project_context_secrets_redacted_before_storage(self):
+        plan = example_plan()
+        plan["project_context"] = "No push; api_key=NEVER_WRITE_RAW_VALUE"
+        plan["steps"][0]["context"] = "Password: local-secret-value"
+        self.flow.create(plan)
+        captured = self.store.db.execute("SELECT project_context FROM flow_plans WHERE id=?",
+                                         ("sample-flow",)).fetchone()[0]
+        self.assertNotIn("NEVER_WRITE_RAW_VALUE", captured)
+        context = self.store.db.execute("SELECT context FROM flow_steps WHERE flow_id=? AND step_key=?",
+                                        ("sample-flow", "build")).fetchone()[0]
+        self.assertNotIn("local-secret-value", context)
+
     def test_model_stdout_handoff_is_bounded_and_untrusted(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
