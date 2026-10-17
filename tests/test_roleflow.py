@@ -111,19 +111,27 @@ class RoleFlowTests(unittest.TestCase):
         manifest = {"changed_paths": ["src/a.py"], "outside_allowlist": [],
                     "line_hints": [{"path": "src/a.py", "lines": ["L10-L18"]}],
                     "handoff_summary": {"summary": "Changed only authorization validation"}}
+        prior_workspace = self.root / "prior-worktree"
+        (prior_workspace / "src").mkdir(parents=True)
+        source = prior_workspace / "src" / "a.py"
+        source.write_text("\\n".join(f"x{i} = {i}" for i in range(1, 25)) + "\\n", encoding="utf-8")
+        manifest["file_sha256"] = {"src/a.py": hashlib.sha256(source.read_bytes()).hexdigest()}
         target.write_text(json.dumps(manifest), encoding="utf-8")
         self.store.add_artifact(build, "codex", "change_manifest", str(target),
                                 hashlib.sha256(target.read_bytes()).hexdigest())
         self.store.complete(build, "codex", "completed", "exited 0",
-                            workspace=str(self.root / "prior-worktree"))
+                            workspace=str(prior_workspace))
         packet = self.flow.handoff(review, root)
         self.assertIn("L10-L18", packet)
         self.assertIn("src/a.py", packet)
         self.assertIn("No push", packet)
         self.assertIn("read-only", packet.lower())
+        self.assertIn("UNTRUSTED source excerpt", packet)
+        self.assertIn("L10: x10 = 10", packet)
         self.assertLessEqual(len(packet), 5501)
         target.write_text("TAMPERED", encoding="utf-8")
-        self.assertIn("untrusted", self.flow.handoff(review, root))
+        with self.assertRaisesRegex(ValueError, "untrusted or stale"):
+            self.flow.handoff(review, root)
 
     def test_model_stdout_handoff_is_bounded_and_untrusted(self):
         with tempfile.TemporaryDirectory() as d:
