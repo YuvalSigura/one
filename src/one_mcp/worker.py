@@ -14,6 +14,8 @@ import time
 from pathlib import Path
 
 from .context import load_config, write_brief
+from .roleflow import RoleFlow
+from .receipts import make_manifest
 from .safety import redact
 from .store import Store
 from .worktrees import isolate, _git
@@ -113,7 +115,7 @@ def _allowed(filename: str, prefixes: list[str]) -> bool:
                for allowed in prefixes)
 
 
-def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=False):
+def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=False, workflow_id=None):
     """Process at most ONE approved task. Does not auto-retry after failure."""
     config = load_config(config_path)
     row = config["agents"].get(agent)
@@ -125,11 +127,12 @@ def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=Fa
     if not repo or not root or not artifacts_dir:
         raise ValueError("config must define repository, worktree_root and artifact_root")
     pending = [task for task in store.list_tasks(assignee=agent, status="queued", limit=100)
-               if task["approval"] == "approved"]
+               if task["approval"] == "approved" and (
+                   workflow_id is None or (RoleFlow(store)._step(task["id"]) or {}).get("flow_id") == workflow_id)]
     if dry_run:
         return {"status": "dry_run", "next_task": pending[-1]["id"] if pending else None,
                 "agent": agent, "will_execute": False}
-    task = store.claim_next(agent, lease_seconds=min(int(row.get("timeout_seconds", 600)) + 120, 3600))
+    task = store.claim_next(agent, lease_seconds=min(int(row.get("timeout_seconds", 600)) + 120, 3600), workflow_id=workflow_id)
     if task is None:
         return {"status": "idle", "agent": agent}
     workspace = None
@@ -137,7 +140,8 @@ def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=Fa
     artifact_dir = Path(artifacts_dir).expanduser().resolve(strict=True)
     try:
         workspace = isolate(repo, root, task)
-        brief, brief_digest = write_brief(task, artifact_dir)
+        brief, brief_digest = write_brief(task, artifact_dir,
+                                          extra_context=RoleFlow(store).handoff(task["id"], artifact_dir))
         argv, prompt, timeout = validated_command(agent, row, brief)
         task_dir = brief.parent
         stdout_path = task_dir / "stdout.log"
@@ -151,7 +155,7 @@ def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=Fa
             store.add_artifact(task["id"], agent, kind, str(path), digest)
         # Changed file list is metadata, never interpreted as verification of security findings.
         manifest = task_dir / "changes.json"
-        manifest.write_text(json.dumps({"changed_paths": changes, "outside_allowlist": offending},
+        manifest.write_text(json.dumps(make_manifest(workspace, changes, offending, stdout_path),
                                        ensure_ascii=False, indent=2), encoding="utf-8")
         store.add_artifact(task["id"], agent, "change_manifest", str(manifest),
                            _hash_file(manifest))
