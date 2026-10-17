@@ -90,6 +90,39 @@ class Store:
           PRIMARY KEY(message_id,recipient),
           FOREIGN KEY(message_id) REFERENCES messages(id)
         );
+        CREATE TABLE IF NOT EXISTS flow_plans (
+          id TEXT PRIMARY KEY,
+          description TEXT NOT NULL,
+          project_context TEXT NOT NULL DEFAULT '',
+          plan_digest TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS flow_steps (
+          flow_id TEXT NOT NULL,
+          step_key TEXT NOT NULL,
+          task_id TEXT NOT NULL UNIQUE,
+          role TEXT NOT NULL,
+          step_order INTEGER NOT NULL,
+          context TEXT NOT NULL DEFAULT '',
+          PRIMARY KEY(flow_id,step_key),
+          FOREIGN KEY(flow_id) REFERENCES flow_plans(id),
+          FOREIGN KEY(task_id) REFERENCES tasks(id)
+        );
+        CREATE TABLE IF NOT EXISTS flow_dependencies (
+          flow_id TEXT NOT NULL,
+          step_key TEXT NOT NULL,
+          upstream_key TEXT NOT NULL,
+          gate TEXT NOT NULL CHECK (gate IN ('completed','accepted')),
+          PRIMARY KEY(flow_id,step_key,upstream_key),
+          FOREIGN KEY(flow_id) REFERENCES flow_plans(id)
+        );
+        CREATE TABLE IF NOT EXISTS flow_verdicts (
+          task_id TEXT PRIMARY KEY,
+          decision TEXT NOT NULL CHECK (decision IN ('accepted','rejected')),
+          reason TEXT NOT NULL,
+          FOREIGN KEY(task_id) REFERENCES tasks(id)
+        );
+        CREATE INDEX IF NOT EXISTS flow_steps_by_task ON flow_steps(task_id);
+        CREATE INDEX IF NOT EXISTS flow_dependencies_step ON flow_dependencies(flow_id,step_key);
         """)
 
     def close(self):
@@ -209,7 +242,7 @@ class Store:
         self._notify(webhook.STATUS_CHANGED, task_id, old_status="queued", new_status="cancelled")
         return self.task(task_id)
 
-    def claim_next(self, agent, lease_seconds=1800):
+    def claim_next(self, agent, lease_seconds=1800, workflow_id=None):
         if agent not in AGENTS - {"operator", "grok-bot"}:
             raise ValueError("no automated worker for this agent")
         if not isinstance(lease_seconds, int) or not 1 <= lease_seconds <= 3600:
@@ -217,8 +250,26 @@ class Store:
         # BEGIN IMMEDIATE atomically selects and claims across worker processes.
         try:
             self.db.execute("BEGIN IMMEDIATE")
-            row = self._one("""SELECT id FROM tasks WHERE status='queued'
-                AND approval='approved' AND assignee=? ORDER BY created LIMIT 1""", (agent,))
+            row = self._one("""SELECT tasks.id FROM tasks WHERE tasks.status='queued'
+                AND tasks.approval='approved' AND tasks.assignee=?
+                AND (? IS NULL OR EXISTS (
+                  SELECT 1 FROM flow_steps scoped
+                  WHERE scoped.task_id=tasks.id AND scoped.flow_id=?
+                ))
+                AND NOT EXISTS (
+                  SELECT 1 FROM flow_steps successor
+                  JOIN flow_dependencies d
+                    ON d.flow_id=successor.flow_id AND d.step_key=successor.step_key
+                  JOIN flow_steps predecessor
+                    ON predecessor.flow_id=d.flow_id AND predecessor.step_key=d.upstream_key
+                  JOIN tasks predecessor_task ON predecessor_task.id=predecessor.task_id
+                  LEFT JOIN flow_verdicts v ON v.task_id=predecessor.task_id
+                  WHERE successor.task_id=tasks.id AND (
+                    predecessor_task.status!='completed' OR
+                    (d.gate='accepted' AND COALESCE(v.decision,'')!='accepted')
+                  )
+                )
+                ORDER BY tasks.created LIMIT 1""", (agent, workflow_id, workflow_id))
             if not row:
                 self.db.execute("COMMIT")
                 return None
