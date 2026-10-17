@@ -103,6 +103,9 @@ class Store:
           role TEXT NOT NULL,
           step_order INTEGER NOT NULL,
           context TEXT NOT NULL DEFAULT '',
+          handoff_mode TEXT NOT NULL DEFAULT 'focused_review',
+          must_know TEXT NOT NULL DEFAULT '{}',
+          required_handoff TEXT NOT NULL DEFAULT '[]',
           PRIMARY KEY(flow_id,step_key),
           FOREIGN KEY(flow_id) REFERENCES flow_plans(id),
           FOREIGN KEY(task_id) REFERENCES tasks(id)
@@ -131,6 +134,16 @@ class Store:
         CREATE INDEX IF NOT EXISTS flow_steps_by_task ON flow_steps(task_id);
         CREATE INDEX IF NOT EXISTS flow_dependencies_step ON flow_dependencies(flow_id,step_key);
         """)
+        # Existing users can have a pilot database created by earlier commits
+        # of this feature branch; upgrade it in place without losing tasks.
+        flow_columns = {row[1] for row in self.db.execute("PRAGMA table_info(flow_steps)")}
+        for name, ddl in {
+            "handoff_mode": "TEXT NOT NULL DEFAULT 'focused_review'",
+            "must_know": "TEXT NOT NULL DEFAULT '{}'",
+            "required_handoff": "TEXT NOT NULL DEFAULT '[]'",
+        }.items():
+            if name not in flow_columns:
+                self.db.execute(f"ALTER TABLE flow_steps ADD COLUMN {name} {ddl}")
 
     def close(self):
         self.db.close()
