@@ -279,6 +279,14 @@ class Store:
                   WHERE scoped.task_id=tasks.id AND scoped.flow_id=?
                 ))
                 AND NOT EXISTS (
+                  SELECT 1 FROM flow_steps scoped
+                  JOIN flow_plans plan ON plan.id=scoped.flow_id
+                  LEFT JOIN flow_authorizations grant_row ON grant_row.flow_id=scoped.flow_id
+                  WHERE scoped.task_id=tasks.id
+                    AND (grant_row.flow_id IS NULL OR grant_row.revoked_at IS NOT NULL
+                         OR grant_row.plan_digest!=plan.plan_digest)
+                )
+                AND NOT EXISTS (
                   SELECT 1 FROM flow_steps successor
                   JOIN flow_dependencies d
                     ON d.flow_id=successor.flow_id AND d.step_key=successor.step_key
