@@ -53,9 +53,11 @@ def main(argv=None):
     flow_template.add_argument("plan", help="Path to an existing reviewed Engineering Desk JSON plan")
     flow_status = sub.add_parser("flow-status", help="Show role pipeline and dependency readiness")
     flow_status.add_argument("flow_id")
-    flow_approve = sub.add_parser("flow-approve", help="Explicitly approve each queued task in frozen pipeline")
+    flow_approve = sub.add_parser("flow-approve", help="Preauthorize frozen flow; approve each task only when dependency-ready")
     flow_approve.add_argument("flow_id")
-    flow_approve.add_argument("--confirm", action="store_true", help="Required operator approval for every task")
+    flow_approve.add_argument("--confirm", action="store_true", help="Explicitly authorize this reviewed workflow")
+    flow_revoke = sub.add_parser("flow-revoke", help="Revoke future task launches; running work must be stopped separately")
+    flow_revoke.add_argument("flow_id")
     flow_verdict = sub.add_parser("flow-verdict", help="Operator review gate; NOT scientific verification")
     flow_verdict.add_argument("task_id")
     flow_verdict.add_argument("decision", choices=["accepted", "rejected"])
@@ -82,8 +84,10 @@ def main(argv=None):
                     result = RoleFlow(store).status(args.flow_id)
                 elif args.command == "flow-approve":
                     if not args.confirm:
-                        raise ValueError("explicit --confirm required before approving ALL pipeline stages")
+                        raise ValueError("explicit --confirm required before authorizing flow")
                     result = RoleFlow(store).approve_all(args.flow_id)
+                elif args.command == "flow-revoke":
+                    result = RoleFlow(store).revoke(args.flow_id)
                 elif args.command == "flow-verdict":
                     result = RoleFlow(store).verdict(args.task_id, args.decision, args.reason)
                 elif args.command == "flow-run":
