@@ -49,7 +49,7 @@ class QualityTests(unittest.TestCase):
         self.task_id = steps[0]["task_id"]
         self.workspace = self.worktrees / self.task_id
         git(self.repo, "worktree", "add", "--detach", str(self.workspace), self.sha)
-        self.store.approve(self.task_id, "approved")
+        self.flow.approve_all("gated")
         self.store.claim_next("codex")
         (self.workspace / "src" / "code.py").write_text("answer = 2\n")
         self.store.complete(self.task_id, "codex", "completed", "ready",
