@@ -106,7 +106,7 @@ class RoleFlowTests(unittest.TestCase):
     def test_precise_handoff_and_tampered_receipt_fails_closed(self):
         stages = self.flow.create(example_plan())["steps"]
         build, review = stages[0]["task_id"], stages[1]["task_id"]
-        self.store.approve(build, "approved")
+        self.flow.approve_all("sample-flow")
         self.store.claim_next("codex")
         root = self.root / "artifacts"
         target = root / build / "changes.json"
@@ -214,7 +214,7 @@ class RoleFlowTests(unittest.TestCase):
         (worktree / "src").mkdir(parents=True)
         codefile = worktree / "src" / "fix.py"
         codefile.write_text("fix = True\n")
-        self.store.approve(prior, "approved")
+        self.flow.approve_all("sample-flow")
         self.store.claim_next("codex")
         manifest = {
             "changed_paths": ["src/fix.py"], "outside_allowlist": [],
@@ -250,7 +250,7 @@ class RoleFlowTests(unittest.TestCase):
             "changed_paths": [], "outside_allowlist": [], "line_hints": [],
             "file_sha256": {}, "handoff_summary": {"summary": "No test record"}
         }))
-        self.store.approve(prior, "approved")
+        self.flow.approve_all("sample-flow")
         self.store.claim_next("codex")
         self.store.add_artifact(prior, "codex", "change_manifest", str(receipt),
                                 hashlib.sha256(receipt.read_bytes()).hexdigest())
