@@ -72,10 +72,12 @@ class RoleFlowTests(unittest.TestCase):
         self.assertEqual(self.store.claim_next("codex")["id"], build)
         self.assertIsNone(self.store.claim_next("claude"))
         self.store.complete(build, "codex", "completed", "patch")
+        self.flow.activate_ready("sample-flow")
         self.assertEqual(self.store.claim_next("claude")["id"], review)
         self.store.complete(review, "claude", "completed", "exit 0 is not proof")
         self.assertIsNone(self.store.claim_next("antigravity"))
         self.flow.verdict(review, "accepted", "operator checked independent review evidence")
+        self.flow.activate_ready("sample-flow")
         self.assertEqual(self.store.claim_next("antigravity")["id"], integrate)
 
     def test_rejected_review_is_permanent_gate_not_verified(self):
@@ -84,6 +86,7 @@ class RoleFlowTests(unittest.TestCase):
         build, review = [s["task_id"] for s in stages[:2]]
         self.store.claim_next("codex")
         self.store.complete(build, "codex", "completed", "patch")
+        self.flow.activate_ready("sample-flow")
         self.store.claim_next("claude")
         self.store.complete(review, "claude", "completed", "found P1")
         decision = self.flow.verdict(review, "rejected", "P1 at src/test.py:42")
@@ -157,6 +160,7 @@ class RoleFlowTests(unittest.TestCase):
                                     hashlib.sha256(path.read_bytes()).hexdigest())
         register(build, "codex", manifest)
         self.store.complete(build, "codex", "completed", "source changed", workspace=str(implementation))
+        self.flow.activate_ready("sample-flow")
         self.store.claim_next("claude")
         reviewer_worktree = self.root / "reviewer-worktree"
         reviewer_worktree.mkdir()
@@ -210,6 +214,35 @@ class RoleFlowTests(unittest.TestCase):
             self.assertEqual(receipt["line_hints"][0]["path"], "src/fix.py")
             self.assertEqual(receipt["handoff_summary"]["summary"], "test pass")
             self.assertIn("src/fix.py", receipt["file_sha256"])
+
+    def test_plan_preapproval_only_unlocks_ready_tasks_for_old_workers(self):
+        self.flow.create(example_plan())
+        approved = self.flow.approve_all("sample-flow")
+        self.assertTrue(approved["operator_authorized"])
+        self.assertEqual([x["approval"] for x in approved["steps"]],
+                         ["approved", "pending", "pending"])
+        # Simulate the legacy ONE v0.2 worker selection query. Future tasks
+        # are invisible even though the operator approved the entire plan.
+        for agent in ("claude", "antigravity"):
+            found = self.store.db.execute(
+                "SELECT id FROM tasks WHERE status='queued' AND approval='approved' AND assignee=?",
+                (agent,)).fetchone()
+            self.assertIsNone(found)
+        self.assertEqual([x["key"] for x in self.flow.ready("sample-flow")], ["build"])
+        self.assertEqual(len(self.store.list_tasks()), 3)
+
+    def test_revoke_stops_future_approved_tasks_and_cannot_be_reauthorized(self):
+        self.flow.create(example_plan())
+        self.flow.approve_all("sample-flow")
+        outcome = self.flow.revoke("sample-flow")
+        self.assertFalse(outcome["operator_authorized"])
+        self.assertEqual(outcome["steps"][0]["approval"], "rejected")
+        self.assertEqual(self.flow.ready("sample-flow"), [])
+        self.assertIsNone(self.store.claim_next("codex"))
+        with self.assertRaisesRegex(ValueError, "authorization"):
+            self.flow.activate_ready("sample-flow")
+        with self.assertRaisesRegex(ValueError, "revoked"):
+            self.flow.approve_all("sample-flow")
 
     def test_dry_run_and_disabled_workers_do_not_launch(self):
         self.flow.create(example_plan())
