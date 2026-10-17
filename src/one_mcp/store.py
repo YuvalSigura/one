@@ -132,6 +132,13 @@ class Store:
           revoked_at REAL,
           FOREIGN KEY(flow_id) REFERENCES flow_plans(id)
         );
+        CREATE TABLE IF NOT EXISTS flow_quality_receipts (
+          task_id TEXT PRIMARY KEY,
+          digest TEXT NOT NULL,
+          artifact_path TEXT NOT NULL,
+          recorded_at REAL NOT NULL,
+          FOREIGN KEY(task_id) REFERENCES tasks(id)
+        );
         CREATE INDEX IF NOT EXISTS flow_steps_by_task ON flow_steps(task_id);
         CREATE INDEX IF NOT EXISTS flow_dependencies_step ON flow_dependencies(flow_id,step_key);
         """)
