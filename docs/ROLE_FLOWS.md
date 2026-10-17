@@ -14,6 +14,34 @@ ONE now supports frozen role-specific DAGs stored inside its existing SQLite Sto
 - ONE keeps the only task execution status; there is no shadow scheduler or competing status database. Each worker retains its existing Git worktree and operator approvals.
 - MCP supports safe role-flow creation and status listing, not approval or execution.
 
+## How ONE decides what context the next agent receives
+
+Each stage has a fixed role and optional context-sufficiency contract:
+
+- "handoff_mode": "execution_only" — default for implementer/integrator. No broad re-discovery or project-wide rereads. Ask for an explicit ONE_CONTEXT_GAP if information is essential and missing.
+- "handoff_mode": "focused_review" — default for reviewer, tester and security-reviewer. Independently inspect the cited diff, needed call sites and tests, but do not replay all earlier investigations.
+- "handoff_mode": "research" — default for researcher/planner. Explore only the bounded research objective and permitted sources, not unrelated project history.
+- "must_know": categorizes indispensable "invariants", "decisions", "facts" and "do_not_repeat" instructions. These are always prioritized over optional code excerpts. The role plan owner is responsible for supplying accurate facts.
+- "required_handoff": list of mandatory predecessor evidence fields ("changed_files", "line_hints", "summary", "tests"). If a declared field is absent, a ONE_CONTEXT_GAP fails the successor's brief before launching its model.
+
+Example for a scoped code reviewer stage:
+
+~~~json
+{
+  "handoff_mode": "focused_review",
+  "must_know": {
+    "invariants": ["The project's existing authority model must remain unchanged"],
+    "decisions": ["Fix the specified bug, not architecture"],
+    "do_not_repeat": ["The root-cause discovery has already been completed"]
+  },
+  "required_handoff": ["changed_files", "line_hints"]
+}
+~~~
+
+The handoff validates mandatory source receipt hashes and prioritizes exact file:line pointers. Optional snippets are omitted with an explicit marker if they cannot fit; **essential facts, decisions, required evidence and no-re-discovery rules are never silently truncated.** If the essentials do not fit, ONE stops with ONE_CONTEXT_GAP instead.
+
+**Important:** A structural completeness check cannot prove that the author included every fact the next agent will need, or that an agent's claimed test success is real. The next agent must still verify key assumptions for its role. These no-re-discovery rules are instructions, not deterministic OS restrictions on reading tools. To physically forbid broad repository reads requires separately reviewed tool permission boundaries.
+
 ## Handoff packet
 
 Agents receive the following instruction to end their final answer with a single-line JSON object:
