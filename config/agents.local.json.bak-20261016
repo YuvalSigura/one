@@ -1,0 +1,25 @@
+﻿{
+  "repository": "C:/Users/yuval/Documents/GitHub/harness-ceo-test",
+  "worktree_root": "C:/Users/yuval/Documents/one-worktrees",
+  "artifact_root": "C:/Users/yuval/.one/artifacts",
+  "agents": {
+    "codex": {
+      "enabled": false,
+      "argv": ["codex", "exec", "--sandbox", "workspace-write", "-"],
+      "input_mode": "stdin",
+      "timeout_seconds": 900
+    },
+    "claude": {
+      "enabled": true,
+      "argv": ["C:/Users/yuval/.local/bin/claude.exe", "-p"],
+      "input_mode": "stdin",
+      "timeout_seconds": 900
+    },
+    "grok-cli": {
+      "enabled": true,
+      "argv": ["C:/Users/yuval/.grok/bin/grok.exe", "-p", "{brief}"],
+      "input_mode": "brief_argument",
+      "timeout_seconds": 600
+    }
+  }
+}

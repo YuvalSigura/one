@@ -1,0 +1,3 @@
+[console_scripts]
+one = one_mcp.cli:main
+one-mcp = one_mcp.server:main
