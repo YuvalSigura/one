@@ -390,6 +390,7 @@ class RoleFlow:
                 lines.extend("- " + fact for fact in knowledge[group])
         lines.append("## Focused predecessor handoff")
         covered, excerpts = set(), []
+        blind_review = current["role"] in {"reviewer", "security-reviewer"}
         parent_sql = """SELECT d.upstream_key,d.gate,s.task_id
             FROM flow_dependencies d JOIN flow_steps s
             ON s.flow_id=d.flow_id AND s.step_key=d.upstream_key
@@ -410,8 +411,9 @@ class RoleFlow:
                 (current["flow_id"], dep["upstream_key"])).fetchall())
             prior = self.store.task(dep["task_id"])
             lines += [f"### {dep['upstream_key']} ({prior['assignee']})",
-                      f"Lifecycle: {prior['status']}; required gate: {dep['gate']}",
-                      f"Worker summary: {(prior.get('result') or '')[:300]}"]
+                      f"Lifecycle: {prior['status']}; required gate: {dep['gate']}"]
+            if not blind_review:
+                lines.append("Worker summary (untrusted): " + redact(str(prior.get("result") or "")[:250]))
             if prior["status"] != "completed":
                 raise ValueError("cannot hand off unfinished predecessor")
             receipt = root / prior["id"] / "changes.json"
@@ -461,12 +463,17 @@ class RoleFlow:
                         covered.add("summary")
                     if isinstance(summary.get("tests"), list) and summary["tests"]:
                         covered.add("tests")
-                    lines.append("Untrusted prior-agent handoff (verify independently):")
-                    lines.append(redact(json.dumps(summary, ensure_ascii=False)[:550]))
+                    if not blind_review:
+                        lines.append("Untrusted prior-agent handoff (verify independently):")
+                        lines.append(redact(json.dumps(summary, ensure_ascii=False)[:550]))
                 if data.get("outside_allowlist"):
                     lines.append("WARNING: predecessor changed disallowed paths; do not integrate.")
             except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
                 raise ValueError("cannot safely hand off: untrusted or stale predecessor artifacts") from exc
+        if blind_review:
+            lines.append("BLIND INDEPENDENT REVIEW: the implementation author's conclusions and test claims "
+                         "are intentionally withheld. Produce your own findings FIRST based on actual diff "
+                         "and directly relevant tests. Another later role may compare the two sets of claims.")
         missing = sorted(set(requirements) - covered)
         if missing:
             raise ValueError("ONE_CONTEXT_GAP missing required predecessor evidence: " +
