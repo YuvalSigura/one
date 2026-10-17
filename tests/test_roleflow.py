@@ -249,6 +249,9 @@ class RoleFlowTests(unittest.TestCase):
         cfg = self.root / "agents.json"
         cfg.write_text(json.dumps({"agents": {"codex": {"enabled": False}}}))
         self.assertTrue(self.flow.execute_approved("sample-flow", cfg)["dry_run"])
+        with self.assertRaisesRegex(ValueError, "authorization"):
+            self.flow.execute_approved("sample-flow", cfg, execute=True)
+        self.flow.approve_all("sample-flow")
         result = self.flow.execute_approved("sample-flow", cfg, execute=True)
         self.assertEqual(result["executions"], [])
 
