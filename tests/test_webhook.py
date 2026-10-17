@@ -110,15 +110,18 @@ class WebhookTests(unittest.TestCase):
             self.store.complete(task["id"], "codex", "completed", "CLI exited 0")
             webhook.flush()
         self.assertEqual(len(self.stub.requests), 2)  # running, completed; exactly one per write
-        sent = self.stub.requests[1]["json"]
+        # Delivery runs on independent daemon threads; HTTP arrival order is not guaranteed.
+        by_status = {record["json"]["new_status"]: record for record in self.stub.requests}
+        self.assertEqual(set(by_status), {"running", "completed"})
+        sent = by_status["completed"]["json"]
         self.assertEqual(sent["event"], "task.status_changed")
         self.assertEqual((sent["old_status"], sent["new_status"], sent["status"]), ("running", "completed", "completed"))
         self.assertEqual((sent["task_id"], sent["title"], sent["assignee"], sent["owner"]),
                          (task["id"], "Hook test", "codex", "grok-bot"))
         self.assertTrue(sent["timestamp"].endswith("Z"))
         self.assertNotIn("message", sent)
-        self.assertEqual(self.stub.requests[0]["json"]["new_status"], "running")
-        self.assertEqual(self.stub.requests[1]["headers"]["Content-Type"], "application/json")
+        self.assertEqual(by_status["running"]["json"]["new_status"], "running")
+        self.assertEqual(by_status["completed"]["headers"]["Content-Type"], "application/json")
         self.assertNotIn("Authorization", self.stub.requests[1]["headers"])
 
     def test_cancel_and_lease_recovery_fire(self):
@@ -130,7 +133,7 @@ class WebhookTests(unittest.TestCase):
             self.store.recover_expired(now=time.time() + 10)
             webhook.flush()
         transitions = [(r["json"]["old_status"], r["json"]["new_status"]) for r in self.stub.requests]
-        self.assertEqual(transitions, [("queued", "cancelled"), ("queued", "running"), ("running", "blocked")])
+        self.assertCountEqual(transitions, [("queued", "cancelled"), ("queued", "running"), ("running", "blocked")])
 
     def test_message_payload_and_truncation(self):
         with self.env(ONE_WEBHOOK_URL=self.stub.url):
