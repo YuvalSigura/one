@@ -4,8 +4,9 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from one_mcp.store import Store
+from one_mcp.store import Store, state_path
 
 
 class StoreTests(unittest.TestCase):
@@ -20,6 +21,27 @@ class StoreTests(unittest.TestCase):
 
     def task(self, **kwargs):
         return self.store.create_task("P0 evidence", "Validate results", "codex", **kwargs)
+
+    def test_one_db_env_trims_accidental_outer_whitespace(self):
+        value = f"  {self.db}  \n"
+        with patch.dict("os.environ", {"ONE_DB": value}):
+            self.assertEqual(state_path(), self.db)
+            with Store() as connected:
+                self.assertEqual(connected.path, self.db)
+
+    def test_one_db_env_rejects_blank_or_controls(self):
+        for value in ("   ", "\t \n ", str(self.db) + "\x00wrong",
+                      str(self.db) + "\nother"):
+            with self.subTest(value=repr(value)):
+                with patch.dict("os.environ", {"ONE_DB": value}):
+                    with self.assertRaisesRegex(ValueError, "ONE_DB"):
+                        state_path()
+
+    def test_one_db_env_rejects_directory_not_sqlite_file(self):
+        with patch.dict("os.environ", {"ONE_DB": f"  {self.temp.name}  "}):
+            with self.assertRaisesRegex(ValueError, "SQLite database FILE"):
+                Store()
+        self.assertFalse((Path(self.temp.name) / "state.db").exists())
 
     def test_idempotency_same_key_and_conflict(self):
         first = self.task(request_key="CEO-1")
