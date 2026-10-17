@@ -24,6 +24,21 @@ The next role gets its own objective, role-specific rules, shared invariant brie
 
 WARNING: each worker starts at a pinned commit in its own isolated worktree. The reviewer does NOT inherit the implementer's uncommitted changes. It must inspect the prior worktree READ-ONLY using the provided focused file hints. Worktrees are not security sandboxes. Receipt hashes may be stale if somebody subsequently edits a previous worktree.
 
+## Use one of the eight Engineering Desk templates
+
+The existing Engineering Desk templates can feed this ONE Role Flow executor without
+running its separate manual queue path. First create a reviewed Engineering Desk
+plan (see docs/ENGINEERING_INTELLIGENCE.md), then:
+
+    .\.venv\Scripts\python.exe -m one_mcp.cli flow-template C:\path\to\reviewed-engineering-plan.json
+    .\.venv\Scripts\python.exe -m one_mcp.cli flow-status ecc-YOUR_PLAN_ID
+
+The converter preserves template roles and dependencies, giving focused handoffs
+between their steps. The Engineering Desk standalone manual queue and the Role Flow
+automatic dispatcher are **alternative modes**. Do not enqueue the same plan through
+both interfaces: that would duplicate its tasks. Only Role Flow provides the
+automatic transition from an approved successful worker into the next role.
+
 ## PowerShell workflow
 
 First customize examples/role_flow.json. Replace all zero commit values with the same genuine 40-hex base commit in the repository configured in config/agents.local.json. Review scopes, enabled workers and objectives.
