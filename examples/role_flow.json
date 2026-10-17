@@ -1,0 +1,93 @@
+{
+  "id": "one-pilot-001",
+  "description": "Implement > independent review > regression tests > operator-gated integration",
+  "project_context": "Development only. Preserve unrelated worktrees, all untracked evidence, and frozen architecture. Do not push, merge, delete, reset, clean, run security targets, or claim unverified work as proof. Read exact changed files and lines first.",
+  "steps": [
+    {
+      "key": "implement",
+      "role": "implementer",
+      "title": "Small isolated implementation",
+      "goal": "Implement one specific reviewed change in the permitted files only. Close your output with ONE_HANDOFF_JSON describing results, tests, risks and next-focus locations.",
+      "assignee": "antigravity",
+      "base_commit": "0000000000000000000000000000000000000000",
+      "allowed_paths": [
+        "src",
+        "tests"
+      ],
+      "acceptance": [
+        "Minimal patch",
+        "Focused tests",
+        "File:line handoff"
+      ],
+      "context": "Replace placeholder commit and tailor objective to a known issue; do not perform unrelated refactors.",
+      "depends_on": []
+    },
+    {
+      "key": "review",
+      "role": "reviewer",
+      "title": "Independent hostile diff review",
+      "goal": "Inspect predecessor worktree read-only at exact changed locations; challenge invariants, race/replay behavior, and failing edge cases. Provide P0/P1/P2 findings with file:line evidence.",
+      "assignee": "claude",
+      "base_commit": "0000000000000000000000000000000000000000",
+      "allowed_paths": [],
+      "acceptance": [
+        "Independent findings with precise locations",
+        "No edits"
+      ],
+      "context": "Review predecessor's uncommitted worktree; your own checkout is pinned and does not contain that patch.",
+      "depends_on": [
+        {
+          "step": "implement",
+          "gate": "completed"
+        }
+      ]
+    },
+    {
+      "key": "regression",
+      "role": "tester",
+      "title": "Targeted adversarial regression tests",
+      "goal": "Write tests for new behavior and review findings. Report fail-old/pass-new evidence where feasible.",
+      "assignee": "codex",
+      "base_commit": "0000000000000000000000000000000000000000",
+      "allowed_paths": [
+        "tests"
+      ],
+      "acceptance": [
+        "Test locations",
+        "Actual commands and results",
+        "No false VERIFIED claims"
+      ],
+      "context": "Do not assume source edits from implementer are present in your own worktree. Inspect predecessor receipts and worktrees explicitly.",
+      "depends_on": [
+        {
+          "step": "review",
+          "gate": "completed"
+        }
+      ]
+    },
+    {
+      "key": "integration",
+      "role": "integrator",
+      "title": "Prepare integration proposal",
+      "goal": "Synthesize code, tests and review evidence into a concise GO/NO-GO integration recommendation. Do not merge or push.",
+      "assignee": "antigravity",
+      "base_commit": "0000000000000000000000000000000000000000",
+      "allowed_paths": [],
+      "acceptance": [
+        "Provenance summary",
+        "File:line anchors",
+        "NO-GO if findings unresolved"
+      ],
+      "depends_on": [
+        {
+          "step": "regression",
+          "gate": "completed"
+        },
+        {
+          "step": "review",
+          "gate": "accepted"
+        }
+      ]
+    }
+  ]
+}
