@@ -13,6 +13,7 @@ from typing import Any
 from . import __version__
 from .store import Store
 from .roleflow import RoleFlow
+from .templates import from_engineering
 
 PROTOCOLS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
 DEFAULT_PROTOCOL = "2025-06-18"
@@ -70,6 +71,9 @@ TOOLS = [
     _spec("one_flow_status", "Read roles, status, approvals and dependency blockers.", {
         "flow_id": _field()
     }, ("flow_id",)),
+    _spec("one_flow_template", "Turn a validated Engineering Desk template into ONE role tasks without approval or execution.", {
+        "plan": {"type": "object", "description": "Engineering Desk plan schema one-engineering/v1"}
+    }, ("plan",)),
 ]
 TOOL_INDEX = {tool["name"]: tool for tool in TOOLS}
 
@@ -108,6 +112,7 @@ def call_tool(store: Store, name: str, args: dict):
         "one_task_events": lambda: store.events(**args),
         "one_flow_create": lambda: RoleFlow(store).create(args["plan"]),
         "one_flow_status": lambda: RoleFlow(store).status(args["flow_id"]),
+        "one_flow_template": lambda: RoleFlow(store).create(from_engineering(args["plan"])),
     }
     return actions[name]()
 
