@@ -152,6 +152,10 @@ class RoleFlow:
             raise
         return self.status(fid)
 
+    def _step(self, task_id):
+        record = self.db.execute("SELECT * FROM flow_steps WHERE task_id=?", (task_id,)).fetchone()
+        return dict(record) if record else None
+
     def status(self, flow_id):
         _id(flow_id, "workflow ID")
         header = self.db.execute("SELECT description FROM flow_plans WHERE id=?", (flow_id,)).fetchone()
