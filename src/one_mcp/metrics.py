@@ -6,6 +6,7 @@ raw provider transcripts, source files, or secrets into the report.
 from __future__ import annotations
 
 from pathlib import Path
+import math
 
 from .roleflow import RoleFlow
 
@@ -28,7 +29,16 @@ def flow_metrics(store, flow_id, config_path=None):
         counts[task["status"]] += 1
         artifacts = store.artifacts(task["id"])
         quality = [a for a in artifacts if a["kind"] == "engineering_quality"]
-        usage = task.get("usage_json")
+        raw_usage = task.get("usage_json")
+        usage = None
+        if isinstance(raw_usage, dict):
+            approved = {}
+            for key in ("input_tokens", "output_tokens", "total_tokens", "cost_usd"):
+                value = raw_usage.get(key)
+                if type(value) in (int, float) and math.isfinite(value) and 0 <= value <= 1e10:
+                    approved[key] = value
+            if approved:
+                usage = approved
         brief_bytes = None
         if artifact_root:
             p = artifact_root / task["id"] / "task.md"
