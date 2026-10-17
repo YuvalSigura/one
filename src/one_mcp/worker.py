@@ -133,12 +133,24 @@ def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=Fa
     if dry_run:
         return {"status": "dry_run", "next_task": pending[-1]["id"] if pending else None,
                 "agent": agent, "will_execute": False}
+    # Validate operator-configured directories before acquiring the durable
+    # task lease. Invalid local paths must never strand a queued task as
+    # 'running' or consume an approval/billable attempt.
+    for label, configured in (("repository", repo), ("worktree_root", root),
+                              ("artifact_root", artifacts_dir)):
+        try:
+            checked = Path(configured).expanduser().resolve(strict=True)
+        except OSError as exc:
+            raise ValueError(f"configured {label} directory does not exist") from exc
+        if not checked.is_dir():
+            raise ValueError(f"configured {label} must be a directory")
+        if label == "artifact_root":
+            artifact_dir = checked
     task = store.claim_next(agent, lease_seconds=min(int(row.get("timeout_seconds", 600)) + 120, 3600), workflow_id=workflow_id)
     if task is None:
         return {"status": "idle", "agent": agent}
     workspace = None
     brief_digest = None
-    artifact_dir = Path(artifacts_dir).expanduser().resolve(strict=True)
     try:
         workspace = isolate(repo, root, task)
         context = RoleFlow(store).handoff(task["id"], artifact_dir)

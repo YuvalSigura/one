@@ -58,6 +58,29 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(execute_one(self.store, "codex", self.config, dry_run=False)["status"], "idle")
         self.assertFalse(list(self.worktrees.iterdir()))
 
+    def test_missing_artifact_root_never_claims_approved_task(self):
+        task = self.create()
+        self.store.approve(task["id"], "approved")
+        self.artifacts.rmdir()
+        with patch("one_mcp.worker._capture", side_effect=AssertionError("must not invoke CLI")):
+            with self.assertRaisesRegex(ValueError, "configured artifact_root directory does not exist"):
+                execute_one(self.store, "codex", self.config, dry_run=False)
+        after = self.store.task(task["id"])
+        self.assertEqual(after["status"], "queued")
+        self.assertEqual(after["approval"], "approved")
+        self.assertEqual(after["attempt"], 0)
+        self.assertFalse(list(self.worktrees.iterdir()))
+
+    def test_non_directory_artifact_root_never_claims_task(self):
+        task = self.create()
+        self.store.approve(task["id"], "approved")
+        self.artifacts.rmdir()
+        self.artifacts.write_text("not a directory", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "artifact_root must be a directory"):
+            execute_one(self.store, "codex", self.config, dry_run=False)
+        self.assertEqual(self.store.task(task["id"])["status"], "queued")
+        self.assertEqual(self.store.task(task["id"])["attempt"], 0)
+
     def test_isolated_worktree_and_logged_completion(self):
         task = self.create(allowed_paths=["src"])
         self.store.approve(task["id"], "approved")
