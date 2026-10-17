@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .store import AGENTS, Store
 from .handoff import focused_predecessor
+from .quality import PROFILES, assert_quality
 from .safety import redact
 
 ROLE_CONTRACTS = {
@@ -107,7 +108,7 @@ def validate_plan(plan):
     result, keys = [], set()
     permitted = {"key", "role", "title", "goal", "assignee", "base_commit",
                  "allowed_paths", "acceptance", "depends_on", "context", "budget",
-                 "handoff_mode", "must_know", "required_handoff"}
+                 "handoff_mode", "must_know", "required_handoff", "required_checks"}
     for item in steps:
         if not isinstance(item, dict) or set(item) - permitted:
             raise ValueError("unknown step fields")
@@ -144,13 +145,19 @@ def validate_plan(plan):
         if not isinstance(paths, list) or not isinstance(acceptance, list):
             raise ValueError("paths/acceptance must be lists")
         handoff_mode, must_know, required_handoff = _context_contract(item, role, deps)
+        required_checks = item.get("required_checks", [])
+        if (not isinstance(required_checks, list) or len(required_checks) > len(PROFILES)
+                or len(set(required_checks)) != len(required_checks)
+                or any(v not in PROFILES for v in required_checks)):
+            raise ValueError("invalid required_checks profile list")
         result.append({"key": key, "role": role, "title": _text(item.get("title"), "title", 200),
                        "goal": _text(item.get("goal"), "goal", 8000),
                        "assignee": assignee, "base_commit": commit,
                        "allowed_paths": paths, "acceptance": acceptance,
                        "depends_on": deps, "context": redact(_text(item.get("context", ""), "context")),
                        "handoff_mode": handoff_mode, "must_know": must_know,
-                       "required_handoff": required_handoff, "budget": budget})
+                       "required_handoff": required_handoff, "required_checks": sorted(required_checks),
+                       "budget": budget})
     table = {x["key"]: x for x in result}
     for item in result:
         if any(d["step"] not in table for d in item["depends_on"]):
@@ -221,11 +228,11 @@ class RoleFlow:
                                               acceptance=item["acceptance"], budget=item["budget"],
                                               request_key=key)
                 self.db.execute("""INSERT INTO flow_steps(
-                    flow_id,step_key,task_id,role,step_order,context,handoff_mode,must_know,required_handoff
-                ) VALUES(?,?,?,?,?,?,?,?,?)""",
+                    flow_id,step_key,task_id,role,step_order,context,handoff_mode,must_know,required_handoff,required_checks
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)""",
                     (fid, item["key"], task["id"], item["role"], order, item["context"],
                      item["handoff_mode"], json.dumps(item["must_know"], ensure_ascii=False),
-                     json.dumps(item["required_handoff"])))
+                     json.dumps(item["required_handoff"]), json.dumps(item["required_checks"])))
                 for dep in item["depends_on"]:
                     self.db.execute("INSERT INTO flow_dependencies(flow_id,step_key,upstream_key,gate) VALUES(?,?,?,?)",
                                     (fid, item["key"], dep["step"], dep["gate"]))
@@ -363,6 +370,10 @@ class RoleFlow:
             raise ValueError("cannot accept a non-completed task")
         if self.db.execute("SELECT 1 FROM flow_verdicts WHERE task_id=?", (task_id,)).fetchone():
             raise ValueError("review verdict is immutable")
+        if decision == "accepted":
+            checks = self.db.execute("SELECT required_checks FROM flow_steps WHERE task_id=?",
+                                     (task_id,)).fetchone()
+            assert_quality(self.store, task_id, json.loads(checks[0]))
         self.db.execute("INSERT INTO flow_verdicts(task_id,decision,reason) VALUES(?,?,?)",
                         (task_id, decision, reason))
         self.store._event(task_id, "operator_review_verdict", {"decision": decision})
