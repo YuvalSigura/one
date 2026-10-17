@@ -301,6 +301,25 @@ class RoleFlowTests(unittest.TestCase):
         self.assertEqual([x["key"] for x in self.flow.ready("sample-flow")], ["build"])
         self.assertEqual(len(self.store.list_tasks()), 3)
 
+    def test_atomic_claim_requires_frozen_operator_flow_authorization(self):
+        steps = self.flow.create(example_plan())["steps"]
+        root = steps[0]["task_id"]
+        self.store.approve(root, "approved")
+        self.assertIsNone(self.store.claim_next("codex"))
+        self.flow.approve_all("sample-flow")
+        self.assertEqual(self.store.claim_next("codex")["id"], root)
+
+    def test_revoke_blocks_new_worker_even_after_manual_task_reapproval(self):
+        steps = self.flow.create(example_plan())["steps"]
+        self.flow.approve_all("sample-flow")
+        self.flow.revoke("sample-flow")
+        # Simulate a direct DB-level erroneous approval: atomic claim must
+        # independently recheck the revoked plan digest (not just task approval).
+        self.store.db.execute(
+            "UPDATE tasks SET approval='approved' WHERE id=?",
+            (steps[0]["task_id"],))
+        self.assertIsNone(self.store.claim_next("codex"))
+
     def test_revoke_stops_future_approved_tasks_and_cannot_be_reauthorized(self):
         self.flow.create(example_plan())
         self.flow.approve_all("sample-flow")
