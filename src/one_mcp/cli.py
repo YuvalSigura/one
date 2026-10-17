@@ -9,7 +9,7 @@ from pathlib import Path
 from .store import Store
 from .worker import execute_one, doctor
 from .connections import emit
-from .roleflow import RoleFlow
+from .roleflow import RoleFlow, read_plan as read_role_plan
 from .templates import from_engineering
 from .engineering import read_plan as read_engineering_plan
 
@@ -75,7 +75,7 @@ def main(argv=None):
         else:
             with Store() as store:
                 if args.command == "flow-create":
-                    result = RoleFlow(store).create(json.loads(Path(args.plan).read_text(encoding="utf-8")))
+                    result = RoleFlow(store).create(read_role_plan(Path(args.plan)))
                 elif args.command == "flow-template":
                     result = RoleFlow(store).create(from_engineering(read_engineering_plan(Path(args.plan))))
                 elif args.command == "flow-status":
