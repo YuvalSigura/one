@@ -119,6 +119,16 @@ If `ONE_WEBHOOK_URL` is set in your environment, clear it for the shell first (`
 
 Further details: [architecture](docs/ARCHITECTURE.md) · [connecting Grok Bot](docs/CONNECT_GROK_BOT.md).
 
+## Experimental: role-based engineering pipelines
+
+A separate development branch adds scoped specialist roles, durable dependency DAGs,
+precise file:line handoff packets, independent operator review gates and an opt-in
+bounded dispatcher over the existing ONE Store and workers. This does not change
+the approvals or safety boundaries of the v0.2 baseline. See
+[role-flow documentation](docs/ROLE_FLOWS.md) and
+[editable example](examples/role_flow.json). Run tests before using on real projects.
+
+
 
 ## Engineering Desk (experimental, opt-in)
 
