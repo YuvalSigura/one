@@ -121,6 +121,66 @@ To prevent any further stages from launching after an operator changes their min
 
 Revocation rejects queued task approvals and prevents later ready-stage promotion. It does NOT kill a worker already running; terminate and inspect that process separately.
 
+## ECC-inspired improvements added in this branch
+
+### Patch-aware tester handoffs
+
+When a TESTER has exactly one IMPLEMENTER ancestor, ONE verifies the previous
+Git worktree is still at the *same pinned base SHA*, compares its Git changes
+to the registered change manifest, validates each changed file digest, and
+materializes ONLY those changed files/deletions into the TESTER's new isolated
+worktree before launching its CLI. The copy remains local and does not touch
+the original implementation worktree or main. Only edits the TESTER actually
+made after that overlay are attributed to it; any attempted modification of
+borrowed source is quarantined. Unknown or multiple competing implementers,
+symlinks, changed manifests, copies/renames, file budget overflow or mismatched
+base commits fail closed. No automatic merging is performed.
+
+The REVIEWER instead sees the implementer's original read-only worktree and
+file:line digest-verified excerpts; it does not inherit uncommitted changes.
+The REVIEWER is **blind**: the implementer's own summary and claimed test
+success are withheld during the first independent review, then available to
+the later integrator along with independent findings. Reviewer context still
+contains the actual diff and project invariants.
+
+### Actual deterministic engineering quality receipts
+
+The operator can execute selected *fixed* local profiles (never model-supplied
+arbitrary commands) against a **completed task's own worktree**:
+
+    .\.venv\Scripts\python.exe -m one_mcp.cli flow-quality TASK-EXAMPLE --config config\agents.local.json --check diff
+    .\.venv\Scripts\python.exe -m one_mcp.cli flow-quality TASK-EXAMPLE --config config\agents.local.json --check pytest
+
+Profiles are \`diff\` (\`git diff --check\`), \`unittest\`
+(\`python -m unittest discover -s tests -v\`) and \`pytest\` (\`python -m pytest -q\`).
+Select only commands appropriate to the repository. This can execute TEST CODE
+in the target checkout, so invoke it only as an explicit local operator action,
+in a disposable isolated repository, with no target credentials or live
+security engagement services.
+
+Optionally declare \`"required_checks": ["diff", "pytest"]\` in a stage
+JSON. When so configured, operator acceptance via \`flow-verdict ... accepted\`
+is blocked until those checks have passed and the worktree fingerprint STILL
+matches the checked source. Engineering results are stored as digested artifacts,
+not as new execution states or as independent scientific truth. Plain
+\`completed\` status is STILL NOT VERIFIED. Stages using \`gate: completed\` may
+proceed without such manual acceptance; use \`gate: accepted\` where acceptance
+must block successor execution.
+
+The receipt is **single-use per task**; do not overwrite it after failed
+tests. Create a fresh correction task in another worktree. No auto-reruns.
+
+### Honest productivity reporting
+
+Read workflow progress, operator verdicts, elapsed wall-clock, check receipts,
+and actual generated brief sizes, without opening transcripts:
+
+    .\.venv\Scripts\python.exe -m one_mcp.cli flow-metrics one-pilot-001 --config config\agents.local.json
+
+Token savings are intentionally reported UNKNOWN until we have comparable
+provider-native usage from independent matched tasks. Prompt bytes are **not**
+provider tokens, and no auto model routing decisions are made from guesses.
+
 ## Trust boundaries and limits
 
 - Do not expose task approval, review verdict or model execution through MCP.
