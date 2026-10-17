@@ -257,6 +257,10 @@ class RoleFlow:
         this database therefore cannot execute a successor prematurely.
         """
         snap = self.status(flow_id)
+        prior_grant = self.db.execute("SELECT revoked_at FROM flow_authorizations WHERE flow_id=?",
+                                      (flow_id,)).fetchone()
+        if prior_grant is not None and prior_grant[0] is not None:
+            raise ValueError("previously revoked flow cannot be reauthorized")
         if any(s["status"] != "queued" or s["approval"] not in {"pending", "approved"}
                for s in snap["steps"]):
             raise ValueError("plan approval only allowed before any task launches")
