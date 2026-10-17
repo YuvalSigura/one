@@ -151,11 +151,16 @@ class RoleFlow:
             self.db.execute("INSERT INTO flow_plans(id,description,project_context,plan_digest) VALUES(?,?,?,?)",
                             (fid, plan["description"], plan["project_context"], digest))
             for order, item in enumerate(plan["steps"]):
+                key = f"flow:{fid}:{item['key']}"
+                # An agent can create ordinary ONE tasks through MCP. Never
+                # let it pre-seed an idempotency key and hijack a new frozen DAG.
+                if self.db.execute("SELECT 1 FROM tasks WHERE request_key=?", (key,)).fetchone():
+                    raise ValueError("preexisting task key conflicts with new workflow")
                 task = self.store.create_task(item["title"], item["goal"], item["assignee"],
                                               owner="operator", base_commit=item["base_commit"],
                                               allowed_paths=item["allowed_paths"],
                                               acceptance=item["acceptance"], budget=item["budget"],
-                                              request_key=f"flow:{fid}:{item['key']}")
+                                              request_key=key)
                 self.db.execute("INSERT INTO flow_steps(flow_id,step_key,task_id,role,step_order,context) VALUES(?,?,?,?,?,?)",
                                 (fid, item["key"], task["id"], item["role"], order, item["context"]))
                 for dep in item["depends_on"]:
