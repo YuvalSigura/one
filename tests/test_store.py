@@ -30,12 +30,18 @@ class StoreTests(unittest.TestCase):
                 self.assertEqual(connected.path, self.db)
 
     def test_one_db_env_rejects_blank_or_controls(self):
-        for value in ("   ", "\t \n ", str(self.db) + "\x00wrong",
-                      str(self.db) + "\nother"):
+        for value in ("   ", "\t \n ", str(self.db) + "\nother"):
             with self.subTest(value=repr(value)):
                 with patch.dict("os.environ", {"ONE_DB": value}):
                     with self.assertRaisesRegex(ValueError, "ONE_DB"):
                         state_path()
+
+    def test_one_db_path_parser_rejects_null_even_if_os_env_cannot_contain_it(self):
+        # Operating systems reject embedded NUL before Python can set an env
+        # variable; exercise the parser by mocking the getter instead.
+        with patch("one_mcp.store.os.environ.get", return_value=str(self.db) + "\x00bad"):
+            with self.assertRaisesRegex(ValueError, "control characters"):
+                state_path()
 
     def test_one_db_env_rejects_directory_not_sqlite_file(self):
         with patch.dict("os.environ", {"ONE_DB": f"  {self.temp.name}  "}):
