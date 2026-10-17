@@ -149,5 +149,85 @@ class RoleFlowTests(unittest.TestCase):
         self.assertEqual(result["executions"], [])
 
 
+    def test_flow_cannot_attach_preseeded_tasks(self):
+        plan = example_plan()
+        build = plan["steps"][0]
+        self.store.create_task(build["title"], build["goal"], build["assignee"],
+                               owner="operator", base_commit=build["base_commit"],
+                               allowed_paths=build["allowed_paths"],
+                               acceptance=build["acceptance"], request_key="flow:sample-flow:build")
+        with self.assertRaisesRegex(ValueError, "preexisting task key"):
+            self.flow.create(plan)
+        self.assertEqual(len(self.store.list_tasks()), 1)
+
+    def test_local_plan_rejects_duplicate_json_keys(self):
+        from one_mcp.roleflow import read_plan
+        path = self.root / "flow.json"
+        path.write_text('{"id":"sample-flow","id":"other","steps":[]}')
+        with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
+            read_plan(path)
+
+    def test_automatic_implementer_to_reviewer_handoff_offline(self):
+        import subprocess
+        repo = self.root / "fixture"
+        repo.mkdir()
+        def git(*args):
+            return subprocess.run(["git", "-C", str(repo), *args], check=True,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        git("init")
+        (repo / "README.md").write_text("baseline", encoding="utf-8")
+        git("add", "README.md")
+        git("-c", "user.name=ONE", "-c", "user.email=one@example.test", "commit", "-m", "baseline")
+        commit = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                check=True, capture_output=True, text=True).stdout.strip()
+        p = example_plan()
+        p["id"] = "smoke-chain"
+        p["steps"] = p["steps"][:2]
+        for step in p["steps"]:
+            step["base_commit"] = commit
+        self.flow.create(p)
+        self.flow.approve_all("smoke-chain")
+        wt = self.root / "worktrees"; wt.mkdir()
+        artifact = self.root / "artifacts"; artifact.mkdir()
+        config = self.root / "config.json"
+        config.write_text(json.dumps({
+            "repository": str(repo), "worktree_root": str(wt),
+            "artifact_root": str(artifact),
+            "agents": {
+                "codex": {"enabled": True, "argv": ["codex", "exec", "-"],
+                          "input_mode": "stdin", "timeout_seconds": 60},
+                "claude": {"enabled": True, "argv": ["claude", "-p"],
+                           "input_mode": "stdin", "timeout_seconds": 60}
+            }
+        }), encoding="utf-8")
+        observed = []
+        def fake_call(argv, cwd, stdin, timeout, stdout_path, stderr_path):
+            brief = Path(stdin.decode("utf-8").splitlines()[0].split("at: ", 1)[1])
+            payload = brief.read_text(encoding="utf-8")
+            if argv[0] == "codex":
+                (cwd / "src").mkdir()
+                (cwd / "src" / "change.py").write_text("changed = True\n")
+                self.assertIn("implementer", payload)
+                stdout_path.write_text('ONE_HANDOFF_JSON: {"summary":"changed module","next_focus":["src/change.py:1"]}\n')
+            else:
+                self.assertIn("src/change.py", payload)
+                self.assertIn("changed module", payload)
+                self.assertIn("L1-L1", payload)
+                self.assertIn("reviewer", payload)
+                observed.append(payload)
+                stdout_path.write_text('ONE_HANDOFF_JSON: {"summary":"review delivered"}\n')
+            stderr_path.write_text("")
+            return 0, False
+        with patch("one_mcp.worker._capture", side_effect=fake_call):
+            result = self.flow.execute_approved("smoke-chain", config,
+                                               max_tasks=2, parallel=2, execute=True)
+        self.assertEqual(len(result["executions"]), 2)
+        self.assertEqual([v["status"] for v in result["executions"]], ["completed", "completed"])
+        self.assertTrue(observed)
+        self.assertEqual([s["status"] for s in self.flow.status("smoke-chain")["steps"]],
+                         ["completed", "completed"])
+        self.assertEqual((repo / "README.md").read_text(), "baseline")
+
+
 if __name__ == "__main__":
     unittest.main()
