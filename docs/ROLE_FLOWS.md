@@ -10,7 +10,7 @@ ONE now supports frozen role-specific DAGs stored inside its existing SQLite Sto
 - Dependents are automatically eligible for atomic claim when completed or manually accepted predecessors satisfy every gate.
 - A completed worker exit code is not VERIFIED. Operator verdicts are immutable and only available through local CLI, never MCP.
 - The next worker receives a brief from the prior stage, not the whole transcript. Worker receipts contain changed file paths, zero-context diff line ranges, content SHA-256 hashes where possible, and a bounded, clearly untrusted structured conclusion.
-- A local, bounded dispatcher can continue already-approved steps from X to Y and run independent provider steps concurrently.
+- The operator preauthorizes the frozen pipeline once, but only dependency-ready steps become approved ONE tasks. This prevents legacy ONE v0.2 workers from claiming future steps out of order. A local, bounded dispatcher promotes newly-ready stages and runs independent providers concurrently.
 - ONE keeps the only task execution status; there is no shadow scheduler or competing status database. Each worker retains its existing Git worktree and operator approvals.
 - MCP supports safe role-flow creation and status listing, not approval or execution.
 
@@ -39,6 +39,27 @@ automatic dispatcher are **alternative modes**. Do not enqueue the same plan thr
 both interfaces: that would duplicate its tasks. Only Role Flow provides the
 automatic transition from an approved successful worker into the next role.
 
+## Safely use this branch alongside Copilot/main
+
+Do NOT switch or reset the existing ONE main checkout. Use a separate clone while
+Copilot is still developing main. For the first offline tests use a distinct
+ONE_DB to avoid creating pilot tasks in the shared production database:
+
+    $pilot = "$HOME\Documents\GitHub\one-roleflow-pilot"
+    git clone --branch feature/one-engineering-intelligence-20261017 --single-branch https://github.com/YuvalSigura/one.git $pilot
+    cd $pilot
+    py -m venv .venv
+    .\.venv\Scripts\python.exe -m pip install -e .
+    $env:ONE_DB = "$HOME\.one\roleflow-pilot.db"
+    .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+
+Run flow-create/status and dry-run commands from this pilot shell. The existing
+ONE MCP server and other connected clients continue using their own previous
+ONE_DB. A legacy client may claim an already-ready approved task, but no future
+dependency-blocked task is approved ahead of time. Do not run legacy CLI workers
+against the pilot DB during the first integration smoke test. Never silently
+switch Copilot's configured ONE_DB to the pilot database.
+
 ## PowerShell workflow
 
 First customize examples/role_flow.json. Replace all zero commit values with the same genuine 40-hex base commit in the repository configured in config/agents.local.json. Review scopes, enabled workers and objectives.
@@ -48,7 +69,7 @@ Create a workflow (no paid model call):
     .\.venv\Scripts\python.exe -m one_mcp.cli flow-create examples\role_flow.json
     .\.venv\Scripts\python.exe -m one_mcp.cli flow-status one-pilot-001
 
-After reviewing all stages, explicitly approve the fixed plan. This alone does not launch providers:
+After reviewing all stages, explicitly authorize the fixed plan. Only currently ready tasks receive individual approval; successors remain pending until the dispatcher sees their gates satisfied. This alone does not launch providers:
 
     .\.venv\Scripts\python.exe -m one_mcp.cli flow-approve one-pilot-001 --confirm
 
@@ -66,12 +87,18 @@ Review exact independent artifacts before permitting the final integration recom
 
 Reinvoke flow-run to proceed after a manual acceptance. Rejected verdicts cannot be rewritten; create a new repair workflow instead.
 
+To prevent any further stages from launching after an operator changes their mind:
+
+    .\.venv\Scripts\python.exe -m one_mcp.cli flow-revoke one-pilot-001
+
+Revocation rejects queued task approvals and prevents later ready-stage promotion. It does NOT kill a worker already running; terminate and inspect that process separately.
+
 ## Trust boundaries and limits
 
 - Do not expose task approval, review verdict or model execution through MCP.
 - No provider budget/quota introspection. Disable exhausted providers; never auto-retry failed paid calls.
 - No auto Git push, merge, reset, clean or changes to HOMELAB targets.
-- No hidden always-running process: the dispatcher advances tasks only while the local flow-run command remains running.
+- No hidden always-running process: the dispatcher advances tasks only while the local flow-run command remains running. The first pilot must use a separate DB; the original ONE main checkout and real provider configurations remain untouched.
 - The shared project context supplied through MCP is task data, not a grant of elevated privileges. Hard approvals and worker path rules remain at the real action boundary.
 - No claim that worker output or multi-agent consensus is equivalent to verified evidence.
 - The structured summary is untrusted. Verify material claims against real diff/tests.
