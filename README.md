@@ -118,3 +118,9 @@ If `ONE_WEBHOOK_URL` is set in your environment, clear it for the shell first (`
 - No `harness` files, logs, engagements, runtime processes, or security targets are modified by ONE installation.
 
 Further details: [architecture](docs/ARCHITECTURE.md) · [connecting Grok Bot](docs/CONNECT_GROK_BOT.md).
+
+
+## Engineering Desk (experimental, opt-in)
+
+ONE also has a development-quality workflow layer: `python -m one_mcp.engineering templates`.
+It ships eight workflows covering defects, features, refactoring, research, security hardening, agent evaluations, releases, and architecture decisions. It builds dependency-gated ONE tasks, enforces operator acceptance of hashed local evidence, and records only explicitly accepted local lessons. **No automatic model invocation, approval, merge, push, or new MCP authority**. See [Engineering Desk](docs/ENGINEERING_INTELLIGENCE.md) for usage and limitations.
