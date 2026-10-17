@@ -133,6 +133,50 @@ class RoleFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "untrusted or stale"):
             self.flow.handoff(review, root)
 
+    def test_transitive_context_survives_reviewer_without_code_changes(self):
+        steps = self.flow.create(example_plan())["steps"]
+        self.flow.approve_all("sample-flow")
+        build, review, integrate = [step["task_id"] for step in steps]
+        artifact = self.root / "artifacts"
+        implementation = self.root / "implementer-worktree"
+        (implementation / "src").mkdir(parents=True)
+        code = implementation / "src" / "change.py"
+        code.write_text("old = False\nnew = True\n")
+        self.store.claim_next("codex")
+        manifest = {
+            "changed_paths": ["src/change.py"], "outside_allowlist": [],
+            "line_hints": [{"path": "src/change.py", "lines": ["L2-L2"]}],
+            "file_sha256": {"src/change.py": hashlib.sha256(code.read_bytes()).hexdigest()},
+            "handoff_summary": {"summary": "implementation summary"}
+        }
+        def register(task_id, worker, doc):
+            path = artifact / task_id / "changes.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(doc))
+            self.store.add_artifact(task_id, worker, "change_manifest", str(path),
+                                    hashlib.sha256(path.read_bytes()).hexdigest())
+        register(build, "codex", manifest)
+        self.store.complete(build, "codex", "completed", "source changed", workspace=str(implementation))
+        self.store.claim_next("claude")
+        reviewer_worktree = self.root / "reviewer-worktree"
+        reviewer_worktree.mkdir()
+        register(review, "claude", {
+            "changed_paths": [], "outside_allowlist": [], "line_hints": [],
+            "file_sha256": {}, "handoff_summary": {"summary": "reviewed implementation"}})
+        self.store.complete(review, "claude", "completed", "review ready",
+                            workspace=str(reviewer_worktree))
+        self.flow.verdict(review, "accepted", "local operator reviewed exact diff")
+        message = self.flow.handoff(integrate, artifact)
+        self.assertIn("src/change.py", message)
+        self.assertIn("L2: new = True", message)
+        self.assertIn("reviewed implementation", message)
+        self.assertIn("implementation summary", message)
+        self.assertLessEqual(len(message), 5501)
+        # Stale ancestor snapshots must fail closed even if direct review is intact.
+        code.write_text("tampered = True\n")
+        with self.assertRaisesRegex(ValueError, "untrusted or stale"):
+            self.flow.handoff(integrate, artifact)
+
     def test_model_stdout_handoff_is_bounded_and_untrusted(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
