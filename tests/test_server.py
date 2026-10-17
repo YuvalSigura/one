@@ -64,6 +64,36 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(results[1]["error"]["code"], -32700)
         self.assertGreater(len(results[2]["result"]["tools"]), 5)
 
+    def test_mcp_initialize_with_whitespace_in_one_db_env(self):
+        """Regression: real Copilot-style stdio spawn must survive outer whitespace."""
+        target = Path(self.temp.name) / "copilot-state.db"
+        env = dict(os.environ, ONE_DB="  " + str(target) + " \n")
+        payload = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"protocolVersion": "2025-06-18"}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+        ]
+        proc = subprocess.run([sys.executable, "-m", "one_mcp.server"],
+                              input="\n".join(json.dumps(x) for x in payload) + "\n",
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              timeout=8, text=True, env=env)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        replies = [json.loads(x) for x in proc.stdout.splitlines()]
+        self.assertEqual(replies[0]["result"]["protocolVersion"], "2025-06-18")
+        self.assertGreaterEqual(len(replies[1]["result"]["tools"]), 9)
+        self.assertTrue(target.is_file())
+
+    def test_mcp_startup_directory_path_fails_with_clear_error(self):
+        """ONE_DB must never silently become a fresh database at another path."""
+        env = dict(os.environ, ONE_DB=str(Path(self.temp.name)) + " ")
+        proc = subprocess.run([sys.executable, "-m", "one_mcp.server"],
+                              input='{"jsonrpc":"2.0","id":1,"method":"initialize"}\n',
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              timeout=8, text=True, env=env)
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("SQLite database FILE", proc.stderr)
+        self.assertEqual(proc.stdout, "")
+
     def test_real_stdio_subprocess_persists_between_connections(self):
         env = dict(os.environ, ONE_DB=str(self.db))
         def conversation(payload):

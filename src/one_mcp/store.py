@@ -17,7 +17,29 @@ TERMINAL = frozenset({"completed", "failed", "blocked", "cancelled"})
 
 
 def state_path() -> Path:
-    return Path(os.getenv("ONE_DB", str(Path.home() / ".one" / "state.db"))).expanduser()
+    """Resolve ONE's single SQLite file; reject ambiguous client MCP config.
+
+    Whitespace sometimes survives JSON/TOML MCP client configuration and is
+    included literally in the child process environment. Trimming *surrounding*
+    whitespace makes the file path robust on Windows without silently selecting
+    another database. A directory is never a valid ONE_DB database path.
+    """
+    default = str(Path.home() / ".one" / "state.db")
+    raw = os.environ.get("ONE_DB")
+    if raw is None:
+        raw = default
+    value = raw.strip()
+    if not value:
+        raise ValueError("ONE_DB is empty; set an absolute SQLite database file path")
+    if any(ord(ch) < 32 for ch in value):
+        raise ValueError("ONE_DB contains control characters; check client MCP env formatting")
+    path = Path(value).expanduser()
+    if path.is_dir() or path.name in {".", "..", ".one"}:
+        raise ValueError(
+            "ONE_DB must name a SQLite database FILE, not a directory. "
+            "Example on Windows: C:\\Users\\<user>\\.one\\state.db"
+        )
+    return path
 
 
 class Store:
