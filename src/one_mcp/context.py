@@ -30,11 +30,19 @@ def task_brief(task: dict) -> str:
     return redact("\n".join(lines)) + "\n"
 
 
-def write_brief(task: dict, artifact_root: Path) -> tuple[Path, str]:
+def write_brief(task: dict, artifact_root: Path, extra_context: str = "") -> tuple[Path, str]:
     artifact_root.mkdir(parents=True, exist_ok=True)
     task_dir = artifact_root / task["id"]
     task_dir.mkdir(parents=True, exist_ok=True)
-    brief = task_brief(task).encode("utf-8")
+    if not isinstance(extra_context, str) or len(extra_context) > 6000:
+        raise ValueError("workflow context must be bounded")
+    if extra_context:
+        extra_context += ("\n## Structured next-agent handoff\n"
+                          "At the end of your final output, provide exactly one single-line packet:\n"
+                          "ONE_HANDOFF_JSON: {\"summary\":\"brief result\",\"tests\":[\"real command: result\"],"
+                          "\"risks\":[\"remaining risk\"],\"next_focus\":[\"file:line for next role\"]}\n"
+                          "Do not include secrets or full source files in this packet.\n")
+    brief = (task_brief(task) + extra_context).encode("utf-8")
     digest = hashlib.sha256(brief).hexdigest()
     path = task_dir / "task.md"
     path.write_bytes(brief)
