@@ -39,6 +39,20 @@ def _text(value, what, max_size=2400):
     return value
 
 
+def read_plan(path):
+    """Reject duplicate keys in local operator-authored plans before any DB writes."""
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key in role workflow")
+            result[key] = value
+        return result
+
+    return validate_plan(json.loads(Path(path).read_text(encoding="utf-8"),
+                                    object_pairs_hook=unique))
+
+
 def validate_plan(plan):
     """Validate the whole DAG BEFORE writing even one task."""
     if not isinstance(plan, dict) or set(plan) - {"id", "description", "project_context", "steps"}:
