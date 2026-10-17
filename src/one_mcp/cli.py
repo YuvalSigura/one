@@ -4,10 +4,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from .store import Store
 from .worker import execute_one, doctor
 from .connections import emit
+from .roleflow import RoleFlow
 
 
 def main(argv=None):
@@ -43,6 +45,23 @@ def main(argv=None):
     connection.add_argument("--output-dir", help="Write new snippet files here, never overwrite")
     check = sub.add_parser("doctor")
     check.add_argument("--config", required=True)
+    flow_create = sub.add_parser("flow-create", help="Create a durable role pipeline; no workers launched")
+    flow_create.add_argument("plan", help="Path to reviewed JSON role-flow plan")
+    flow_status = sub.add_parser("flow-status", help="Show role pipeline and dependency readiness")
+    flow_status.add_argument("flow_id")
+    flow_approve = sub.add_parser("flow-approve", help="Explicitly approve each queued task in frozen pipeline")
+    flow_approve.add_argument("flow_id")
+    flow_approve.add_argument("--confirm", action="store_true", help="Required operator approval for every task")
+    flow_verdict = sub.add_parser("flow-verdict", help="Operator review gate; NOT scientific verification")
+    flow_verdict.add_argument("task_id")
+    flow_verdict.add_argument("decision", choices=["accepted", "rejected"])
+    flow_verdict.add_argument("--reason", required=True)
+    flow_run = sub.add_parser("flow-run", help="Dispatch only approved stages, with dependency handoffs")
+    flow_run.add_argument("flow_id")
+    flow_run.add_argument("--config", required=True)
+    flow_run.add_argument("--max-tasks", type=int, default=8)
+    flow_run.add_argument("--parallel", type=int, default=2)
+    flow_run.add_argument("--execute", action="store_true", help="Actually invoke paid providers; default dry run")
     args = parser.parse_args(argv)
     try:
         if args.command == "connections":
@@ -51,7 +70,20 @@ def main(argv=None):
             result = doctor(args.config)
         else:
             with Store() as store:
-                if args.command == "create":
+                if args.command == "flow-create":
+                    result = RoleFlow(store).create(json.loads(Path(args.plan).read_text(encoding="utf-8")))
+                elif args.command == "flow-status":
+                    result = RoleFlow(store).status(args.flow_id)
+                elif args.command == "flow-approve":
+                    if not args.confirm:
+                        raise ValueError("explicit --confirm required before approving ALL pipeline stages")
+                    result = RoleFlow(store).approve_all(args.flow_id)
+                elif args.command == "flow-verdict":
+                    result = RoleFlow(store).verdict(args.task_id, args.decision, args.reason)
+                elif args.command == "flow-run":
+                    result = RoleFlow(store).execute_approved(args.flow_id, args.config,
+                        max_tasks=args.max_tasks, parallel=args.parallel, execute=args.execute)
+                elif args.command == "create":
                     result = store.create_task(args.title, args.goal, args.assignee, args.owner,
                                                args.base_commit, args.allowed_path, args.acceptance,
                                                args.budget, args.request_key)
