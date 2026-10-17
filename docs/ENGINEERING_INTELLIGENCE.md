@@ -1,6 +1,12 @@
 # ONE Engineering Desk — opt-in development intelligence (experimental)
 
-ONE Engineering Desk adds **eight structured, ECC-inspired workflows** above the existing ONE task store. No external ECC code, plugins, models, hooks, network servers, cloud accounts or extra Python dependencies are installed. No changes to `one_mcp.server` or its nine MCP tools.
+**Branch integration note:** This document describes the conservative Engineering Desk
+manual evidence-acceptance mode. The same branch also offers ONE Role Flow
+(see docs/ROLE_FLOWS.md), which converts these templates into automatic
+role-to-role handoff workflows with dependency-aware worker claims.
+Use ONE mode per plan; never queue the same work through both.
+
+ONE Engineering Desk adds **eight structured, ECC-inspired workflows** above the existing ONE task store. No external ECC code, plugins, models, hooks, network servers, cloud accounts or extra Python dependencies are installed. Engineering Desk itself does not expose approvals or paid-worker launches; the separate Role Flow adds safe plan/status tools to ONE MCP.
 
 The emphasis is *shipping actual work* with a reproducible sequence: reproduce → fail-old regression → small fix → verify → independent review → explicit acceptance. Different workflows support feature delivery, trust-boundary hardening, refactoring, research falsification, agent evaluation, release review and multi-perspective architecture decisions.
 
