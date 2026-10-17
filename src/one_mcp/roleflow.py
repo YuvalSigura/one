@@ -258,7 +258,7 @@ class RoleFlow:
                 paths, hints = data.get("changed_paths"), data.get("line_hints", [])
                 if not isinstance(paths, list) or not isinstance(hints, list):
                     raise ValueError("invalid manifest")
-                lines.append("Predecessor worktree (READ ONLY): " + str(prior.get("workspace") or "not recorded"))
+                lines.append("Predecessor worktree (READ-ONLY): " + str(prior.get("workspace") or "not recorded"))
                 lines.append("Inspect these paths and line ranges FIRST:")
                 used = set()
                 for item in hints[:32]:
