@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .store import AGENTS, Store
 from .handoff import focused_predecessor
+from .safety import redact
 
 ROLE_CONTRACTS = {
     "planner": "Break the objective into bounded steps, assumptions, file anchors, invariants and acceptance tests. Do not change code.",
@@ -59,8 +60,8 @@ def validate_plan(plan):
     if not isinstance(plan, dict) or set(plan) - {"id", "description", "project_context", "steps"}:
         raise ValueError("invalid workflow plan fields")
     fid = _id(plan.get("id"), "workflow ID")
-    description = _text(plan.get("description", ""), "description")
-    shared = _text(plan.get("project_context", ""), "project_context")
+    description = redact(_text(plan.get("description", ""), "description"))
+    shared = redact(_text(plan.get("project_context", ""), "project_context"))
     steps = plan.get("steps")
     if not isinstance(steps, list) or not 1 <= len(steps) <= 32:
         raise ValueError("plan must have 1..32 steps")
@@ -106,7 +107,7 @@ def validate_plan(plan):
                        "goal": _text(item.get("goal"), "goal", 8000),
                        "assignee": assignee, "base_commit": commit,
                        "allowed_paths": paths, "acceptance": acceptance,
-                       "depends_on": deps, "context": _text(item.get("context", ""), "context"),
+                       "depends_on": deps, "context": redact(_text(item.get("context", ""), "context")),
                        "budget": budget})
     table = {x["key"]: x for x in result}
     for item in result:
@@ -127,6 +128,21 @@ def validate_plan(plan):
 
     for key in table:
         dfs(key)
+    # A reviewer of implementation must not secretly be the same named worker.
+    # This is operational separation only; it does not prove model independence.
+    for item in result:
+        if item["role"] not in {"reviewer", "security-reviewer"}:
+            continue
+        upstream, pending = set(), [d["step"] for d in item["depends_on"]]
+        while pending:
+            source = pending.pop()
+            if source in upstream:
+                continue
+            upstream.add(source)
+            pending.extend(d["step"] for d in table[source]["depends_on"])
+        if any(table[source]["role"] == "implementer" and
+               table[source]["assignee"] == item["assignee"] for source in upstream):
+            raise ValueError("reviewer must not be the same worker as upstream implementer")
     return {"id": fid, "description": description, "project_context": shared, "steps": result}
 
 
