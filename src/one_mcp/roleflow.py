@@ -58,6 +58,8 @@ def validate_plan(plan):
         key = _id(item.get("key"), "step key")
         if key in keys:
             raise ValueError("duplicate step key")
+        if len(fid) + len(key) + len("flow::") > 128:
+            raise ValueError("workflow+step id exceeds ONE request_key limit")
         keys.add(key)
         role, assignee = item.get("role"), item.get("assignee")
         if role not in ROLE_CONTRACTS:
