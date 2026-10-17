@@ -16,6 +16,7 @@ from pathlib import Path
 from .context import load_config, write_brief
 from .roleflow import RoleFlow
 from .receipts import make_manifest
+from .patches import materialize_for_tester, classify_test_changes
 from .safety import redact
 from .store import Store
 from .worktrees import isolate, _git
@@ -140,15 +141,25 @@ def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=Fa
     artifact_dir = Path(artifacts_dir).expanduser().resolve(strict=True)
     try:
         workspace = isolate(repo, root, task)
-        brief, brief_digest = write_brief(task, artifact_dir,
-                                          extra_context=RoleFlow(store).handoff(task["id"], artifact_dir))
+        context = RoleFlow(store).handoff(task["id"], artifact_dir)
+        # Materialize the exact independently hashed implementer change into
+        # this TESTER's isolated worktree; never test the stale base checkout.
+        borrowed = materialize_for_tester(store, task, workspace, artifact_dir)
+        if borrowed:
+            context += ("\n## Test checkout fidelity\n"
+                        "The upstream implementation snapshot is MATERIALIZED in your "
+                        "current isolated worktree and must be treated as read-only. "
+                        "Run tests against THIS checkout. Do not change borrowed source files.\n")
+        brief, brief_digest = write_brief(task, artifact_dir, extra_context=context)
         argv, prompt, timeout = validated_command(agent, row, brief)
         task_dir = brief.parent
         stdout_path = task_dir / "stdout.log"
         stderr_path = task_dir / "stderr.log"
         exit_code, timed_out = _capture(argv, workspace, prompt, timeout, stdout_path, stderr_path)
-        changes = _changes(workspace)
-        offending = [f for f in changes if not _allowed(f, task["allowed_paths"])]
+        raw_changes = _changes(workspace)
+        changes, altered_borrowed = classify_test_changes(workspace, borrowed, raw_changes)
+        offending = sorted(set(altered_borrowed +
+                         [f for f in changes if not _allowed(f, task["allowed_paths"])]))
         # Register exact hash of immutable-in-practice local log; do not inline into model context.
         for kind, path in (("stdout", stdout_path), ("stderr", stderr_path)):
             digest = _hash_file(path)
