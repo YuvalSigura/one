@@ -4,10 +4,16 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from .store import Store
 from .worker import execute_one, doctor
 from .connections import emit
+from .roleflow import RoleFlow, read_plan as read_role_plan
+from .templates import from_engineering
+from .engineering import read_plan as read_engineering_plan
+from .quality import run_quality
+from .metrics import flow_metrics
 
 
 def main(argv=None):
@@ -43,6 +49,34 @@ def main(argv=None):
     connection.add_argument("--output-dir", help="Write new snippet files here, never overwrite")
     check = sub.add_parser("doctor")
     check.add_argument("--config", required=True)
+    flow_create = sub.add_parser("flow-create", help="Create a durable role pipeline; no workers launched")
+    flow_create.add_argument("plan", help="Path to reviewed JSON role-flow plan")
+    flow_template = sub.add_parser("flow-template", help="Convert an Engineering Desk method to a runnable role DAG")
+    flow_template.add_argument("plan", help="Path to an existing reviewed Engineering Desk JSON plan")
+    flow_status = sub.add_parser("flow-status", help="Show role pipeline and dependency readiness")
+    flow_status.add_argument("flow_id")
+    flow_approve = sub.add_parser("flow-approve", help="Preauthorize frozen flow; approve each task only when dependency-ready")
+    flow_approve.add_argument("flow_id")
+    flow_approve.add_argument("--confirm", action="store_true", help="Explicitly authorize this reviewed workflow")
+    flow_revoke = sub.add_parser("flow-revoke", help="Revoke future task launches; running work must be stopped separately")
+    flow_revoke.add_argument("flow_id")
+    flow_verdict = sub.add_parser("flow-verdict", help="Operator review gate; NOT scientific verification")
+    flow_verdict.add_argument("task_id")
+    flow_verdict.add_argument("decision", choices=["accepted", "rejected"])
+    flow_verdict.add_argument("--reason", required=True)
+    flow_metrics_cmd = sub.add_parser("flow-metrics", help="Read-only workflow effectiveness and context overhead")
+    flow_metrics_cmd.add_argument("flow_id")
+    flow_metrics_cmd.add_argument("--config", help="Optional config to count actual generated task brief bytes")
+    flow_quality = sub.add_parser("flow-quality", help="Run local deterministic checks; never launches AI providers")
+    flow_quality.add_argument("task_id")
+    flow_quality.add_argument("--config", required=True, help="Reviewed local worker configuration")
+    flow_quality.add_argument("--check", action="append", choices=["diff", "unittest", "pytest"], required=True)
+    flow_run = sub.add_parser("flow-run", help="Dispatch only approved stages, with dependency handoffs")
+    flow_run.add_argument("flow_id")
+    flow_run.add_argument("--config", required=True)
+    flow_run.add_argument("--max-tasks", type=int, default=8)
+    flow_run.add_argument("--parallel", type=int, default=2)
+    flow_run.add_argument("--execute", action="store_true", help="Actually invoke paid providers; default dry run")
     args = parser.parse_args(argv)
     try:
         if args.command == "connections":
@@ -51,7 +85,28 @@ def main(argv=None):
             result = doctor(args.config)
         else:
             with Store() as store:
-                if args.command == "create":
+                if args.command == "flow-create":
+                    result = RoleFlow(store).create(read_role_plan(Path(args.plan)))
+                elif args.command == "flow-template":
+                    result = RoleFlow(store).create(from_engineering(read_engineering_plan(Path(args.plan))))
+                elif args.command == "flow-status":
+                    result = RoleFlow(store).status(args.flow_id)
+                elif args.command == "flow-approve":
+                    if not args.confirm:
+                        raise ValueError("explicit --confirm required before authorizing flow")
+                    result = RoleFlow(store).approve_all(args.flow_id)
+                elif args.command == "flow-revoke":
+                    result = RoleFlow(store).revoke(args.flow_id)
+                elif args.command == "flow-verdict":
+                    result = RoleFlow(store).verdict(args.task_id, args.decision, args.reason)
+                elif args.command == "flow-metrics":
+                    result = flow_metrics(store, args.flow_id, args.config)
+                elif args.command == "flow-quality":
+                    result = run_quality(store, args.task_id, args.config, args.check)
+                elif args.command == "flow-run":
+                    result = RoleFlow(store).execute_approved(args.flow_id, args.config,
+                        max_tasks=args.max_tasks, parallel=args.parallel, execute=args.execute)
+                elif args.command == "create":
                     result = store.create_task(args.title, args.goal, args.assignee, args.owner,
                                                args.base_commit, args.allowed_path, args.acceptance,
                                                args.budget, args.request_key)

@@ -12,6 +12,8 @@ from typing import Any
 
 from . import __version__
 from .store import Store
+from .roleflow import RoleFlow
+from .templates import from_engineering
 
 PROTOCOLS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
 DEFAULT_PROTOCOL = "2025-06-18"
@@ -63,6 +65,15 @@ TOOLS = [
     _spec("one_task_events", "Read bounded task event history without full logs.", {
         "task_id": _field(), "limit": _field("integer")
     }, ("task_id",)),
+    _spec("one_flow_create", "Create role-based dependency DAG tasks; does NOT approve or execute workers.", {
+        "plan": {"type": "object", "description": "Role plan with id, project_context and scoped steps"}
+    }, ("plan",)),
+    _spec("one_flow_status", "Read roles, status, approvals and dependency blockers.", {
+        "flow_id": _field()
+    }, ("flow_id",)),
+    _spec("one_flow_template", "Turn a validated Engineering Desk template into ONE role tasks without approval or execution.", {
+        "plan": {"type": "object", "description": "Engineering Desk plan schema one-engineering/v1"}
+    }, ("plan",)),
 ]
 TOOL_INDEX = {tool["name"]: tool for tool in TOOLS}
 
@@ -80,6 +91,7 @@ def validate_args(tool_name: str, args: Any):
         valid = (expected == "string" and isinstance(value, str)) or (
             expected == "integer" and type(value) is int) or (
             expected == "boolean" and type(value) is bool) or (
+            expected == "object" and isinstance(value, dict)) or (
             expected == "array" and isinstance(value, list))
         if not valid:
             raise ValueError(f"incorrect type for {key}: expected {expected}")
@@ -98,6 +110,9 @@ def call_tool(store: Store, name: str, args: dict):
         "one_register_artifact": lambda: store.add_artifact(**args),
         "one_list_artifacts": lambda: store.artifacts(**args),
         "one_task_events": lambda: store.events(**args),
+        "one_flow_create": lambda: RoleFlow(store).create(args["plan"]),
+        "one_flow_status": lambda: RoleFlow(store).status(args["flow_id"]),
+        "one_flow_template": lambda: RoleFlow(store).create(from_engineering(args["plan"])),
     }
     return actions[name]()
 

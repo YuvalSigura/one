@@ -118,3 +118,19 @@ If `ONE_WEBHOOK_URL` is set in your environment, clear it for the shell first (`
 - No `harness` files, logs, engagements, runtime processes, or security targets are modified by ONE installation.
 
 Further details: [architecture](docs/ARCHITECTURE.md) · [connecting Grok Bot](docs/CONNECT_GROK_BOT.md).
+
+## Experimental: role-based engineering pipelines
+
+A separate development branch adds scoped specialist roles, durable dependency DAGs,
+precise file:line handoff packets, independent operator review gates and an opt-in
+bounded dispatcher over the existing ONE Store and workers. This does not change
+the approvals or safety boundaries of the v0.2 baseline. See
+[role-flow documentation](docs/ROLE_FLOWS.md) and
+[editable example](examples/role_flow.json). Run tests before using on real projects.
+
+
+
+## Engineering Desk (experimental, opt-in)
+
+ONE also has a development-quality workflow layer: `python -m one_mcp.engineering templates`.
+It ships eight workflows covering defects, features, refactoring, research, security hardening, agent evaluations, releases, and architecture decisions. It builds dependency-gated ONE tasks, enforces operator acceptance of hashed local evidence, and records only explicitly accepted local lessons. **No automatic model invocation, approval, merge, push, or new MCP authority**. See [Engineering Desk](docs/ENGINEERING_INTELLIGENCE.md) for usage and limitations.

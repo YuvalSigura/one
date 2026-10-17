@@ -14,6 +14,9 @@ import time
 from pathlib import Path
 
 from .context import load_config, write_brief
+from .roleflow import RoleFlow
+from .receipts import make_manifest
+from .patches import materialize_for_tester, classify_test_changes
 from .safety import redact
 from .store import Store
 from .worktrees import isolate, _git
@@ -113,7 +116,7 @@ def _allowed(filename: str, prefixes: list[str]) -> bool:
                for allowed in prefixes)
 
 
-def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=False):
+def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=False, workflow_id=None):
     """Process at most ONE approved task. Does not auto-retry after failure."""
     config = load_config(config_path)
     row = config["agents"].get(agent)
@@ -125,11 +128,12 @@ def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=Fa
     if not repo or not root or not artifacts_dir:
         raise ValueError("config must define repository, worktree_root and artifact_root")
     pending = [task for task in store.list_tasks(assignee=agent, status="queued", limit=100)
-               if task["approval"] == "approved"]
+               if task["approval"] == "approved" and (
+                   workflow_id is None or (RoleFlow(store)._step(task["id"]) or {}).get("flow_id") == workflow_id)]
     if dry_run:
         return {"status": "dry_run", "next_task": pending[-1]["id"] if pending else None,
                 "agent": agent, "will_execute": False}
-    task = store.claim_next(agent, lease_seconds=min(int(row.get("timeout_seconds", 600)) + 120, 3600))
+    task = store.claim_next(agent, lease_seconds=min(int(row.get("timeout_seconds", 600)) + 120, 3600), workflow_id=workflow_id)
     if task is None:
         return {"status": "idle", "agent": agent}
     workspace = None
@@ -137,21 +141,32 @@ def execute_one(store: Store, agent: str, config_path: str | Path, *, dry_run=Fa
     artifact_dir = Path(artifacts_dir).expanduser().resolve(strict=True)
     try:
         workspace = isolate(repo, root, task)
-        brief, brief_digest = write_brief(task, artifact_dir)
+        context = RoleFlow(store).handoff(task["id"], artifact_dir)
+        # Materialize the exact independently hashed implementer change into
+        # this TESTER's isolated worktree; never test the stale base checkout.
+        borrowed = materialize_for_tester(store, task, workspace, artifact_dir)
+        if borrowed:
+            context += ("\n## Test checkout fidelity\n"
+                        "The upstream implementation snapshot is MATERIALIZED in your "
+                        "current isolated worktree and must be treated as read-only. "
+                        "Run tests against THIS checkout. Do not change borrowed source files.\n")
+        brief, brief_digest = write_brief(task, artifact_dir, extra_context=context)
         argv, prompt, timeout = validated_command(agent, row, brief)
         task_dir = brief.parent
         stdout_path = task_dir / "stdout.log"
         stderr_path = task_dir / "stderr.log"
         exit_code, timed_out = _capture(argv, workspace, prompt, timeout, stdout_path, stderr_path)
-        changes = _changes(workspace)
-        offending = [f for f in changes if not _allowed(f, task["allowed_paths"])]
+        raw_changes = _changes(workspace)
+        changes, altered_borrowed = classify_test_changes(workspace, borrowed, raw_changes)
+        offending = sorted(set(altered_borrowed +
+                         [f for f in changes if not _allowed(f, task["allowed_paths"])]))
         # Register exact hash of immutable-in-practice local log; do not inline into model context.
         for kind, path in (("stdout", stdout_path), ("stderr", stderr_path)):
             digest = _hash_file(path)
             store.add_artifact(task["id"], agent, kind, str(path), digest)
         # Changed file list is metadata, never interpreted as verification of security findings.
         manifest = task_dir / "changes.json"
-        manifest.write_text(json.dumps({"changed_paths": changes, "outside_allowlist": offending},
+        manifest.write_text(json.dumps(make_manifest(workspace, changes, offending, stdout_path),
                                        ensure_ascii=False, indent=2), encoding="utf-8")
         store.add_artifact(task["id"], agent, "change_manifest", str(manifest),
                            _hash_file(manifest))
