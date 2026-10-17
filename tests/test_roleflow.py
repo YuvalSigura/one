@@ -114,7 +114,7 @@ class RoleFlowTests(unittest.TestCase):
         prior_workspace = self.root / "prior-worktree"
         (prior_workspace / "src").mkdir(parents=True)
         source = prior_workspace / "src" / "a.py"
-        source.write_text("\\n".join(f"x{i} = {i}" for i in range(1, 25)) + "\\n", encoding="utf-8")
+        source.write_text("\n".join(f"x{i} = {i}" for i in range(1, 25)) + "\n", encoding="utf-8")
         manifest["file_sha256"] = {"src/a.py": hashlib.sha256(source.read_bytes()).hexdigest()}
         target.write_text(json.dumps(manifest), encoding="utf-8")
         self.store.add_artifact(build, "codex", "change_manifest", str(target),
