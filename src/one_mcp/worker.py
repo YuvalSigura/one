@@ -46,17 +46,33 @@ def validated_command(agent: str, row: dict, brief: Path) -> tuple[list[str], by
     mode = row.get("input_mode")
     if mode not in ("stdin", "brief_argument"):
         raise ValueError("input_mode must be stdin or brief_argument")
-    instruction = "Read the approved ONE development task at: " + str(brief) + "\n" + (
+    constraints = (
         "Carry out only that task within the current isolated worktree. "
         "Report exact changes and checks. Do not push, merge, or access secrets."
     )
     if mode == "brief_argument":
+        # Compatibility for CLIs that accept a prompt argument. Such agents
+        # must be explicitly permitted to read the artifact-root brief.
+        instruction = "Read the approved ONE development task at: " + str(brief) + "\n" + constraints
         if sum(a.count("{brief}") for a in argv) != 1:
             raise ValueError("brief_argument requires exactly one {brief} placeholder")
         argv = [x.replace("{brief}", instruction) for x in argv]
         return argv, None, timeout
     if any("{brief}" in x for x in argv):
         raise ValueError("stdin mode may not interpolate brief")
+    # Restricted agents only see their isolated Git worktree, while task.md
+    # is intentionally stored outside it as a durable, hashed artifact.
+    # Send the generated, redacted task brief inline; never require a model
+    # to open a path outside its read-only execution boundary.
+    task_content = brief.read_text(encoding="utf-8")
+    if not task_content.strip():
+        raise ValueError("approved task brief is empty")
+    instruction = (
+        "Read the approved ONE development task BELOW; it is fully included "
+        "in this stdin message. The task.md artifact is outside your worktree "
+        "and must not be opened.\n\n"
+        + task_content + "\n\n" + constraints
+    )
     return argv, instruction.encode("utf-8"), timeout
 
 
