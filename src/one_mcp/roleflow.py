@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -217,22 +218,82 @@ class RoleFlow:
                           "assignee": task["assignee"], "status": task["status"],
                           "approval": task["approval"], "ready": task["status"] == "queued" and not waiting,
                           "waiting_on": waiting, "verdict": dict(verdict) if verdict else None})
-        return {"id": flow_id, "description": header["description"], "steps": steps}
+        authorization = self.db.execute(
+            "SELECT revoked_at FROM flow_authorizations WHERE flow_id=?", (flow_id,)
+        ).fetchone()
+        return {"id": flow_id, "description": header["description"], "steps": steps,
+                "operator_authorized": bool(authorization is not None and authorization[0] is None)}
 
     def ready(self, flow_id):
         return [step for step in self.status(flow_id)["steps"] if step["ready"] and step["approval"] == "approved"]
 
+    def _activate_ready_locked(self, flow_id):
+        """Only promote ready tasks, never future steps visible to old workers."""
+        row = self.db.execute("""SELECT p.plan_digest,a.plan_digest,a.revoked_at
+            FROM flow_plans p JOIN flow_authorizations a ON a.flow_id=p.id
+            WHERE p.id=?""", (flow_id,)).fetchone()
+        if row is None or row[0] != row[1] or row[2] is not None:
+            raise ValueError("flow has no active operator authorization")
+        for step in self.status(flow_id)["steps"]:
+            if step["ready"] and step["approval"] == "pending":
+                self.store.approve(step["task_id"], "approved")
+
+    def activate_ready(self, flow_id):
+        """Local dispatcher-only step: approve just those whose gates are satisfied."""
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            self._activate_ready_locked(flow_id)
+            self.db.execute("COMMIT")
+        except Exception:
+            if self.db.in_transaction:
+                self.db.execute("ROLLBACK")
+            raise
+        return self.ready(flow_id)
+
     def approve_all(self, flow_id):
-        """Explicit local CLI approval of a fixed plan; NEVER exposed as MCP tool."""
+        """Operator authorizes a frozen plan, NOT future queued tasks all at once.
+
+        Keep downstream tasks pending until ready. Legacy v0.2 workers sharing
+        this database therefore cannot execute a successor prematurely.
+        """
         snap = self.status(flow_id)
         if any(s["status"] != "queued" or s["approval"] not in {"pending", "approved"}
                for s in snap["steps"]):
-            raise ValueError("bulk approval only allowed for a not-yet-started plan")
+            raise ValueError("plan approval only allowed before any task launches")
+        if any(s["approval"] == "approved" and not s["ready"] for s in snap["steps"]):
+            raise ValueError("unsafe prematurely approved dependent task")
         self.db.execute("BEGIN IMMEDIATE")
         try:
-            for step in snap["steps"]:
-                if step["approval"] == "pending":
-                    self.store.approve(step["task_id"], "approved")
+            digest = self.db.execute("SELECT plan_digest FROM flow_plans WHERE id=?",
+                                     (flow_id,)).fetchone()[0]
+            grant = self.db.execute("SELECT plan_digest,revoked_at FROM flow_authorizations WHERE flow_id=?",
+                                    (flow_id,)).fetchone()
+            if grant is not None and (grant[0] != digest or grant[1] is not None):
+                raise ValueError("conflicting or previously revoked flow authorization")
+            if grant is None:
+                self.db.execute("INSERT INTO flow_authorizations VALUES (?,?,?,NULL)",
+                                (flow_id, digest, time.time()))
+            self._activate_ready_locked(flow_id)
+            self.db.execute("COMMIT")
+        except Exception:
+            if self.db.in_transaction:
+                self.db.execute("ROLLBACK")
+            raise
+        return self.status(flow_id)
+
+    def revoke(self, flow_id):
+        """Stop any FUTURE launches; does not kill an already running provider."""
+        self.db.execute("BEGIN IMMEDIATE")
+        try:
+            row = self.db.execute("SELECT 1 FROM flow_authorizations WHERE flow_id=? AND revoked_at IS NULL",
+                                  (flow_id,)).fetchone()
+            if row is None:
+                raise ValueError("no active flow authorization")
+            self.db.execute("UPDATE flow_authorizations SET revoked_at=? WHERE flow_id=?",
+                            (time.time(), flow_id))
+            self.db.execute("""UPDATE tasks SET approval='rejected'
+                WHERE status='queued' AND approval='approved'
+                AND id IN (SELECT task_id FROM flow_steps WHERE flow_id=?)""", (flow_id,))
             self.db.execute("COMMIT")
         except Exception:
             if self.db.in_transaction:
@@ -353,6 +414,7 @@ class RoleFlow:
                     "enabled_workers": sorted(enabled)}
         results, path = [], self.store.path
         while len(results) < max_tasks:
+            self.activate_ready(flow_id)
             eligible, agents = self.ready(flow_id), []
             for step in eligible:
                 if step["assignee"] in enabled and step["assignee"] not in agents:
