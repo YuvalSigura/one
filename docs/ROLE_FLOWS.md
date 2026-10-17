@@ -20,7 +20,7 @@ Agents receive the following instruction to end their final answer with a single
 
     ONE_HANDOFF_JSON: {"summary":"short result","tests":["actual command: outcome"],"risks":["remaining risk"],"next_focus":["src/file.py:45-51"]}
 
-The next role gets its own objective, role-specific rules, shared invariant brief, the previous worker's path and relevant changed file:line ranges, and this bounded untrusted summary. Do not reread unrelated repository files unless necessary to validate the exact claim.
+The next role gets its own objective, role-specific rules, shared invariant brief, the previous worker's path and relevant changed file:line ranges, and this bounded untrusted summary. The handoff also traverses earlier ancestors (for example, implementer -> reviewer -> tester) so file locations do not vanish at an intermediate read-only review. It provides small line-numbered code excerpts after checking file SHA-256 against the worker's receipt. If a required receipt is missing, changed, or points outside the worktree, that stage blocks before invoking the provider. Do not reread unrelated repository files unless necessary to validate the exact claim.
 
 WARNING: each worker starts at a pinned commit in its own isolated worktree. The reviewer does NOT inherit the implementer's uncommitted changes. It must inspect the prior worktree READ-ONLY using the provided focused file hints. Worktrees are not security sandboxes. Receipt hashes may be stale if somebody subsequently edits a previous worktree.
 
