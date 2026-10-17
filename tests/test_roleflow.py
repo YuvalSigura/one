@@ -200,6 +200,76 @@ class RoleFlowTests(unittest.TestCase):
                                         ("sample-flow", "build")).fetchone()[0]
         self.assertNotIn("local-secret-value", context)
 
+    def test_no_rediscovery_policy_and_essential_decisions_survive_handoff(self):
+        plan = example_plan()
+        plan["steps"][1]["handoff_mode"] = "execution_only"
+        plan["steps"][1]["must_know"] = {
+            "decisions": ["Architectural F1-F12 contracts are frozen"],
+            "do_not_repeat": ["Prior root-cause investigation already completed"]}
+        plan["steps"][1]["required_handoff"] = ["changed_files", "line_hints", "summary"]
+        tasks = self.flow.create(plan)["steps"]
+        prior, following = tasks[0]["task_id"], tasks[1]["task_id"]
+        artifact = self.root / "artifacts"
+        worktree = self.root / "upstream"
+        (worktree / "src").mkdir(parents=True)
+        codefile = worktree / "src" / "fix.py"
+        codefile.write_text("fix = True\n")
+        self.store.approve(prior, "approved")
+        self.store.claim_next("codex")
+        manifest = {
+            "changed_paths": ["src/fix.py"], "outside_allowlist": [],
+            "line_hints": [{"path": "src/fix.py", "lines": ["L1-L1"]}],
+            "file_sha256": {"src/fix.py": hashlib.sha256(codefile.read_bytes()).hexdigest()},
+            "handoff_summary": {"summary": "Fixed root cause", "tests": ["unit tests passed"]}
+        }
+        receipt = artifact / prior / "changes.json"
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text(json.dumps(manifest))
+        self.store.add_artifact(prior, "codex", "change_manifest", str(receipt),
+                                hashlib.sha256(receipt.read_bytes()).hexdigest())
+        self.store.complete(prior, "codex", "completed", "finished", workspace=str(worktree))
+        prompt = self.flow.handoff(following, artifact)
+        self.assertIn("DO NOT restart discovery", prompt)
+        self.assertIn("Prior root-cause investigation already completed", prompt)
+        self.assertIn("F1-F12 contracts are frozen", prompt)
+        self.assertIn("L1-L1", prompt)
+        self.assertIn("Required context fields present", prompt)
+        self.assertLessEqual(len(prompt), 5500)
+
+    def test_missing_required_evidence_blocks_next_agent_before_launch(self):
+        plan = example_plan()
+        plan["steps"][1]["required_handoff"] = ["tests"]
+        tasks = self.flow.create(plan)["steps"]
+        prior, following = tasks[0]["task_id"], tasks[1]["task_id"]
+        root = self.root / "artifacts"
+        predecessor_worktree = self.root / "empty-predecessor"
+        predecessor_worktree.mkdir()
+        receipt = root / prior / "changes.json"
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text(json.dumps({
+            "changed_paths": [], "outside_allowlist": [], "line_hints": [],
+            "file_sha256": {}, "handoff_summary": {"summary": "No test record"}
+        }))
+        self.store.approve(prior, "approved")
+        self.store.claim_next("codex")
+        self.store.add_artifact(prior, "codex", "change_manifest", str(receipt),
+                                hashlib.sha256(receipt.read_bytes()).hexdigest())
+        self.store.complete(prior, "codex", "completed", "finished",
+                            workspace=str(predecessor_worktree))
+        with self.assertRaisesRegex(ValueError, "ONE_CONTEXT_GAP.*tests"):
+            self.flow.handoff(following, root)
+
+    def test_essential_context_never_silently_truncated(self):
+        plan = example_plan()
+        plan["project_context"] = "B" * 2300
+        plan["steps"][0]["context"] = "C" * 2300
+        plan["steps"][0]["must_know"] = {"decisions": ["D" * 250] * 5}
+        stage = self.flow.create(plan)["steps"][0]["task_id"]
+        artifact = self.root / "artifacts"
+        artifact.mkdir()
+        with self.assertRaisesRegex(ValueError, "ONE_CONTEXT_GAP.*budget"):
+            self.flow.handoff(stage, artifact)
+
     def test_model_stdout_handoff_is_bounded_and_untrusted(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
