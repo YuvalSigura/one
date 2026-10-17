@@ -102,6 +102,51 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(self.store.task(task["id"])["status"], "completed")
         self.assertTrue(result["review_required"])
 
+    def test_restricted_reviewer_receives_complete_brief_inline(self):
+        """A restricted reviewer cannot read the artifact root from its worktree."""
+        task = self.store.create_task(
+            "F3 live-binding review", "Inspect F3 state-time live bindings", "claude",
+            base_commit=self.commit, allowed_paths=["README.md"],
+            acceptance=["Cite exact file:line findings or state no findings"])
+        self.store.approve(task["id"], "approved")
+        config = json.loads(self.config.read_text(encoding="utf-8"))
+        config["agents"] = {
+            "claude": {"enabled": True, "argv": [
+                "claude", "-p", "--restricted", "--tools", "Read,Grep,Glob",
+                "--strict-mcp-config", "--permission-mode", "plan"],
+                "input_mode": "stdin", "timeout_seconds": 60}}
+        self.config.write_text(json.dumps(config), encoding="utf-8")
+
+        def fake_capture(argv, cwd, stdin, timeout, stdout_path, stderr_path):
+            self.assertIn("--restricted", argv)
+            self.assertIn("--strict-mcp-config", argv)
+            self.assertIsInstance(stdin, bytes)
+            brief = stdin.decode("utf-8")
+            self.assertIn("Read the approved ONE development task BELOW", brief)
+            self.assertIn("Task: " + task["id"], brief)
+            self.assertIn("Inspect F3 state-time live bindings", brief)
+            self.assertIn("Base commit: " + self.commit, brief)
+            self.assertIn("Cite exact file:line findings", brief)
+            self.assertNotIn(str(self.artifacts.resolve()), brief)
+            stdout_path.write_text("README.md:1 checked; no defects found", encoding="utf-8")
+            stderr_path.write_text("", encoding="utf-8")
+            return 0, False
+
+        with patch("one_mcp.worker._capture", side_effect=fake_capture):
+            result = execute_one(self.store, "claude", self.config, dry_run=False)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["changed_paths"], [])
+        self.assertEqual((self.repo / "README.md").read_text(), "baseline")
+        self.assertTrue((self.artifacts / task["id"] / "task.md").is_file())
+
+    def test_stdin_refuses_empty_task_brief(self):
+        empty = self.base / "empty.md"
+        empty.write_text("", encoding="utf-8")
+        row = {"enabled": True, "argv": ["claude", "-p"],
+               "input_mode": "stdin", "timeout_seconds": 60}
+        with self.assertRaisesRegex(ValueError, "brief is empty"):
+            validated_command("claude", row, empty)
+
     def test_changes_outside_allowlist_are_quarantined(self):
         task = self.create(allowed_paths=["src"])
         self.store.approve(task["id"], "approved")

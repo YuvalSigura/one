@@ -135,8 +135,8 @@ class PatchAwareTests(unittest.TestCase):
                     'ONE_HANDOFF_JSON: {"summary":"changed answer","tests":["local smoke pass"]}\n')
             else:
                 self.assertEqual((cwd / "src" / "module.py").read_text(), "answer = 2\n")
-                instruction = Path(str(stdin.decode()).split("at: ", 1)[1].splitlines()[0])
-                prompt = instruction.read_text()
+                # Restricted providers receive the complete task inline via stdin.
+                prompt = stdin.decode("utf-8")
                 self.assertIn("MATERIALIZED", prompt)
                 self.assertIn("BLIND INDEPENDENT", prompt) if False else None
                 (cwd / "tests").mkdir()
