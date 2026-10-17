@@ -441,7 +441,8 @@ class RoleFlowTests(unittest.TestCase):
                 stdout_path.write_text('ONE_HANDOFF_JSON: {"summary":"changed module","next_focus":["src/change.py:1"]}\n')
             else:
                 self.assertIn("src/change.py", payload)
-                self.assertIn("changed module", payload)
+                self.assertNotIn("changed module", payload)
+                self.assertIn("BLIND INDEPENDENT REVIEW", payload)
                 self.assertIn("L1-L1", payload)
                 self.assertIn("reviewer", payload)
                 observed.append(payload)
