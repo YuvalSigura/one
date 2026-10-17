@@ -253,13 +253,24 @@ class RoleFlow:
                  "## Shared project invariants", shared or "Follow the pinned repository policies.",
                  "## Task-specific context", current["context"] or "Follow the objective and acceptance criteria.",
                  "## Focused predecessor handoff"]
-        deps = self.db.execute("""SELECT d.upstream_key,d.gate,s.task_id
+        parent_sql = """SELECT d.upstream_key,d.gate,s.task_id
             FROM flow_dependencies d JOIN flow_steps s
             ON s.flow_id=d.flow_id AND s.step_key=d.upstream_key
-            WHERE d.flow_id=? AND d.step_key=? ORDER BY s.step_order""",
-            (current["flow_id"], current["step_key"]))
+            WHERE d.flow_id=? AND d.step_key=? ORDER BY s.step_order"""
+        pending = list(self.db.execute(parent_sql, (current["flow_id"], current["step_key"])))
+        visited = set()
         root = Path(artifact_root).expanduser().resolve(strict=True)
-        for dep in deps:
+        while pending:
+            dep = pending.pop(0)
+            if dep["task_id"] in visited:
+                continue
+            visited.add(dep["task_id"])
+            if len(visited) > 32:
+                raise ValueError("workflow handoff exceeds ancestor budget")
+            # Traverse transitive ancestors so reviewer -> tester never loses
+            # the original implementer's file:line evidence.
+            pending.extend(self.db.execute(parent_sql,
+                (current["flow_id"], dep["upstream_key"])).fetchall())
             prior = self.store.task(dep["task_id"])
             lines += [f"### {dep['upstream_key']} ({prior['assignee']})",
                       f"Lifecycle: {prior['status']}; required gate: {dep['gate']}",
