@@ -451,8 +451,8 @@ class RoleFlowTests(unittest.TestCase):
         }), encoding="utf-8")
         observed = []
         def fake_call(argv, cwd, stdin, timeout, stdout_path, stderr_path):
-            brief = Path(stdin.decode("utf-8").splitlines()[0].split("at: ", 1)[1])
-            payload = brief.read_text(encoding="utf-8")
+            # The task and predecessor handoff must be available inside stdin.
+            payload = stdin.decode("utf-8")
             if argv[0] == "codex":
                 (cwd / "src").mkdir()
                 (cwd / "src" / "change.py").write_text("changed = True\n")
