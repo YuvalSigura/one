@@ -40,6 +40,19 @@
           "step": "implement",
           "gate": "completed"
         }
+      ],
+      "handoff_mode": "focused_review",
+      "must_know": {
+        "decisions": [
+          "Implementation scope was established upstream; do not reopen architectural design."
+        ],
+        "do_not_repeat": [
+          "Do not repeat repository-wide discovery; independently verify the supplied diff and necessary call sites."
+        ]
+      },
+      "required_handoff": [
+        "changed_files",
+        "line_hints"
       ]
     },
     {
@@ -63,6 +76,19 @@
           "step": "review",
           "gate": "completed"
         }
+      ],
+      "handoff_mode": "focused_review",
+      "must_know": {
+        "facts": [
+          "The implementer patch is in its own worktree, not the tester's checkout."
+        ],
+        "do_not_repeat": [
+          "Do not reproduce the original reconnaissance unless cited evidence is inconsistent."
+        ]
+      },
+      "required_handoff": [
+        "changed_files",
+        "line_hints"
       ]
     },
     {
@@ -87,6 +113,19 @@
           "step": "review",
           "gate": "accepted"
         }
+      ],
+      "handoff_mode": "execution_only",
+      "must_know": {
+        "decisions": [
+          "Produce an integration recommendation only; no merge or push."
+        ],
+        "invariants": [
+          "Acceptance by operator does not make an unverified finding true."
+        ]
+      },
+      "required_handoff": [
+        "changed_files",
+        "summary"
       ]
     }
   ]
