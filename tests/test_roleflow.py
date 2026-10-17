@@ -274,6 +274,59 @@ class RoleFlowTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicate JSON key"):
             read_plan(path)
 
+    def test_parallel_independent_workers_claim_separate_tasks_once(self):
+        import subprocess
+        import threading
+        repo = self.root / "parallel-fixture"
+        repo.mkdir()
+        def git(*args):
+            subprocess.run(["git", "-C", str(repo), *args], check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        git("init")
+        (repo / "README.md").write_text("baseline")
+        git("add", "README.md")
+        git("-c", "user.name=ONE", "-c", "user.email=one@example.test", "commit", "-m", "init")
+        commit = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                                check=True, capture_output=True, text=True).stdout.strip()
+        plan = example_plan()
+        plan["id"] = "parallel-smoke"
+        plan["steps"] = plan["steps"][:2]
+        plan["steps"][1]["role"] = "tester"
+        plan["steps"][1]["depends_on"] = []
+        for step in plan["steps"]:
+            step["base_commit"] = commit
+        self.flow.create(plan)
+        self.flow.approve_all("parallel-smoke")
+        worktrees = self.root / "parallel-worktrees"; worktrees.mkdir()
+        artifacts = self.root / "parallel-artifacts"; artifacts.mkdir()
+        config = self.root / "parallel.json"
+        config.write_text(json.dumps({
+            "repository": str(repo), "worktree_root": str(worktrees),
+            "artifact_root": str(artifacts),
+            "agents": {
+                "codex": {"enabled": True, "argv": ["codex", "exec", "-"],
+                          "input_mode": "stdin", "timeout_seconds": 60},
+                "claude": {"enabled": True, "argv": ["claude", "-p"],
+                           "input_mode": "stdin", "timeout_seconds": 60}
+            }
+        }))
+        barrier = threading.Barrier(2)
+        invocations = []
+        guard = threading.Lock()
+        def fake_capture(argv, cwd, stdin, timeout, stdout_path, stderr_path):
+            with guard:
+                invocations.append(argv[0])
+            barrier.wait(timeout=15)
+            stdout_path.write_text('ONE_HANDOFF_JSON: {"summary":"parallel stage complete"}\n')
+            stderr_path.write_text("")
+            return 0, False
+        with patch("one_mcp.worker._capture", side_effect=fake_capture):
+            result = self.flow.execute_approved("parallel-smoke", config, execute=True,
+                                                max_tasks=2, parallel=2)
+        self.assertCountEqual(invocations, ["codex", "claude"])
+        self.assertEqual(len(result["executions"]), 2)
+        self.assertTrue(all(x["status"] == "completed" for x in result["executions"]))
+
     def test_automatic_implementer_to_reviewer_handoff_offline(self):
         import subprocess
         repo = self.root / "fixture"
