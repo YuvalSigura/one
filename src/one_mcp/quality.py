@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import time
+import tempfile
 from pathlib import Path
 
 from .context import load_config
@@ -79,10 +80,15 @@ def run_quality(store, task_id, config_path, checks, *, timeout=120):
     for check in checks:
         command = PROFILES[check]
         try:
-            process = subprocess.run(command, cwd=str(worktree), shell=False,
-                                     stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT, timeout=timeout, check=False)
-            output = redact(process.stdout[-2000:].decode("utf-8", "replace"))
+            # Spool potentially noisy test runner output to disk. Only the
+            # final 2KiB is ever read into memory or persisted in a receipt.
+            with tempfile.TemporaryFile() as transcript:
+                process = subprocess.run(command, cwd=str(worktree), shell=False,
+                                         stdin=subprocess.DEVNULL, stdout=transcript,
+                                         stderr=subprocess.STDOUT, timeout=timeout, check=False)
+                transcript.seek(0, 2)
+                transcript.seek(max(0, transcript.tell() - 2000))
+                output = redact(transcript.read().decode("utf-8", "replace"))
             report["checks"][check] = {"passed": process.returncode == 0,
                                         "exit_code": process.returncode,
                                         "output_tail": output}
